@@ -1,0 +1,40 @@
+# HireInsight-Agent Dependencies
+# Pin versions for environment consistency
+
+# Web UI Framework
+streamlit==1.39.0
+
+# AI Orchestration
+langgraph==0.2.56
+langchain-core==0.3.86
+langchain-deepseek==0.1.4
+
+# Data Processing
+pandas==2.2.3
+numpy==1.26.4
+
+# Database & Vector Store
+scikit-learn==1.5.2
+# sqlite3 (Python built-in, no pip install needed)
+
+# PDF Processing
+pdfplumber==0.11.4
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# HTTP Client (for API calls)
+requests==2.32.3
+
+# Data Visualization (optional)
+streamlit-aggrid==1.0.5
+plotly==5.24.1
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+# Compression
+brotli==1.1.0
+
+# Development Tools (python-dotenv already listed above)
