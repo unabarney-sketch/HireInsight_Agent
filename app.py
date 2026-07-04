@@ -12,6 +12,7 @@ HireInsight-Agent - Streamlit 主程序入口
 """
 import os
 import sys
+import base64
 import streamlit as st
 from dotenv import load_dotenv
 import plotly.graph_objects as go
@@ -34,6 +35,28 @@ from graphs.state import InterviewState, LighthousePlanState
 from graphs.lighthouse_nodes import question_filter_node, assessment_node
 from utils.question_bank import get_full_question_bank, get_valid_tendencies
 
+# 用户认证与历史记录
+from utils.auth_db import register_user, verify_login, update_user_profile
+from utils.chat_history import (
+    save_interview_record,
+    save_lighthouse_record,
+    get_interview_history,
+    get_lighthouse_history,
+    get_interview_record,
+    get_lighthouse_record,
+    delete_interview_record,
+    delete_lighthouse_record,
+)
+from utils.session_manager import (
+    init_auth,
+    init_history,
+    is_logged_in,
+    get_current_user,
+    login_user,
+    logout_user,
+    refresh_user_session,
+)
+
 # RAG 向量存储单例导入
 try:
     from utils.rag_loader import get_or_init_collection as _get_or_init_collection
@@ -42,6 +65,24 @@ except ImportError:
 
 # 加载环境变量
 load_dotenv()
+
+# ============================================================
+# Banner 图片绝对路径（防 Streamlit 相对路径上下文对齐失败）
+# ============================================================
+_CURRENT_DIR: str = os.path.dirname(os.path.abspath(__file__))
+
+def _resolve_banner_path(filename: str) -> str | None:
+    """在 assets/ 下自动匹配 .jpg/.png 后缀，返回绝对路径或 None"""
+    for ext in (".jpg", ".png"):
+        path = os.path.join(_CURRENT_DIR, "assets", f"{filename}{ext}")
+        if os.path.isfile(path):
+            return path
+    return None
+
+INTERVIEW_BANNER_PATH: str | None = _resolve_banner_path("interview_banner")
+LIGHTHOUSE_BANNER_PATH: str | None = _resolve_banner_path("lighthouse_banner")
+HOME_BANNER_PATH: str | None = _resolve_banner_path("home_banner")
+DASHBOARD_BANNER_PATH: str | None = _resolve_banner_path("dashboard_banner")
 
 # ============================================================
 # 数据库路径
@@ -56,6 +97,7 @@ PAGE_MAP: dict[str, str] = {
     "数据大屏": "📊 数据大屏",
     "灯塔计划": "🧭 灯塔计划",
     "面试模拟": "🎤 面试模拟",
+    "我的": "👤 我的",
     "系统设置": "⚙️ 系统设置",
 }
 # 反向索引：Emoji 全名 → 短名
@@ -130,6 +172,266 @@ st.set_page_config(
 )
 
 # ============================================================
+# 全局 Creamy Clean 奶油风 CSS
+# ============================================================
+st.markdown("""
+<style>
+/* ---- 全局背景：温暖奶茶色 ---- */
+.stApp {
+    background-color: #F6F5F2;
+}
+section[data-testid="stSidebar"] > div {
+    background-color: #F6F5F2;
+}
+header[data-testid="stHeader"] {
+    background-color: #F6F5F2;
+}
+
+/* ---- 宽屏容器 ---- */
+div[data-testid="stAppViewBlockContainer"] {
+    max-width: 95% !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+}
+
+/* ---- 字体：PingFang 人文无衬线 ---- */
+html, body, .stApp, section[data-testid="stSidebar"],
+.stMarkdown, .stButton, .stTextInput, .stSelectbox, .stTextArea {
+    font-family: "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif !important;
+}
+
+/* ---- 卡片容器：纯白大圆角 ---- */
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border: 1px solid #EFEFEF !important;
+    border-radius: 18px !important;
+    background-color: #FFFFFF !important;
+    padding: 24px 32px !important;
+}
+
+/* ---- 按钮：巧克力褐 + 悬停微浮 ---- */
+.stButton > button,
+.stDownloadButton > button {
+    background-color: #2D2722 !important;
+    border: none !important;
+    color: #FFFFFF !important;
+    border-radius: 18px !important;
+    font-weight: 500 !important;
+    padding: 10px 28px !important;
+    transition: transform 0.25s ease, box-shadow 0.25s ease !important;
+}
+.stButton > button:hover,
+.stDownloadButton > button:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 6px 18px rgba(45, 39, 34, 0.15) !important;
+    background-color: #3E352E !important;
+}
+
+/* ---- 强制覆盖 Streamlit 内置 button[kind] 文字色（含内部 p 标签） ---- */
+.stButton > button[kind="primary"],
+.stButton > button[kind="primary"]:hover,
+.stButton > button[kind="primary"]:focus,
+.stButton > button[kind="primary"]:active,
+.stButton > button[kind="secondary"],
+.stButton > button[kind="secondary"]:hover,
+.stButton > button[kind="secondary"]:focus,
+.stButton > button[kind="secondary"]:active,
+.stDownloadButton > button[kind="primary"],
+.stDownloadButton > button[kind="primary"]:hover,
+.stDownloadButton > button[kind="secondary"],
+.stDownloadButton > button[kind="secondary"]:hover,
+.stButton > button p,
+.stButton > button span,
+.stButton > button div p,
+.stButton > button div span,
+.stDownloadButton > button p,
+.stDownloadButton > button span,
+.stDownloadButton > button div p,
+.stDownloadButton > button div span {
+    color: #FFFFFF !important;
+}
+
+/* ---- 表单提交按钮 ---- */
+.stFormSubmitButton > button {
+    background-color: #2D2722 !important;
+    border: none !important;
+    color: #FFFFFF !important;
+    border-radius: 18px !important;
+    font-weight: 500 !important;
+    transition: transform 0.25s ease, box-shadow 0.25s ease !important;
+}
+.stFormSubmitButton > button:hover {
+    transform: translateY(-3px) !important;
+    box-shadow: 0 6px 18px rgba(45, 39, 34, 0.15) !important;
+    background-color: #3E352E !important;
+}
+
+/* ---- 输入框 ---- */
+.stTextInput input,
+.stTextArea textarea {
+    background-color: #FFFFFF !important;
+    border: 1px solid #EFEFEF !important;
+    color: #4A4A4A !important;
+    border-radius: 18px !important;
+}
+.stTextInput input:focus,
+.stTextArea textarea:focus {
+    border-color: #D3D3D3 !important;
+    box-shadow: 0 0 0 3px rgba(45, 39, 34, 0.04) !important;
+}
+
+/* ---- Selectbox ---- */
+.stSelectbox > div > div {
+    background-color: #FFFFFF !important;
+    border: 1px solid #EFEFEF !important;
+    color: #4A4A4A !important;
+    border-radius: 18px !important;
+}
+
+/* ---- File Uploader ---- */
+.stFileUploader section {
+    border: 1px dashed #D3D3D3 !important;
+    background-color: #FFFFFF !important;
+    border-radius: 18px !important;
+}
+
+/* ---- Expander ---- */
+[data-testid="stExpander"] details {
+    border: 1px solid #EFEFEF !important;
+    background-color: #FFFFFF !important;
+    border-radius: 18px !important;
+}
+
+/* ---- 标题：巧克力褐 ---- */
+h1, h2, h3, h4, h5, h6 {
+    color: #2D2722 !important;
+    font-weight: 600 !important;
+}
+h1 {
+    font-size: 2rem !important;
+    letter-spacing: -0.02em !important;
+}
+
+/* ---- 普通文本：深炭灰 ---- */
+p, span, label, .stMarkdown, .stTextInput label, .stSelectbox label, .stTextArea label {
+    color: #4A4A4A !important;
+}
+
+/* ---- Sidebar ---- */
+section[data-testid="stSidebar"] label {
+    color: #7A7A7A !important;
+}
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h3 {
+    color: #2D2722 !important;
+}
+section[data-testid="stSidebar"] hr {
+    border-color: #EFEFEF !important;
+}
+
+/* ---- Metrics ---- */
+[data-testid="stMetricValue"] {
+    color: #2D2722 !important;
+    font-weight: 600 !important;
+}
+[data-testid="stMetricLabel"] {
+    color: #7A7A7A !important;
+}
+[data-testid="stMetricDelta"] {
+    color: #34C759 !important;
+}
+
+/* ---- Links ---- */
+a {
+    color: #5A8FC7 !important;
+}
+
+/* ---- Dividers ---- */
+hr {
+    border-color: #EFEFEF !important;
+}
+
+/* ---- Captions ---- */
+.stCaption, small {
+    color: #7A7A7A !important;
+}
+
+/* ---- Multiselect Tags ---- */
+.stMultiSelect [data-baseweb="tag"] {
+    border-radius: 10px !important;
+    background-color: #F5F5F2 !important;
+    border: 1px solid #EFEFEF !important;
+    color: #4A4A4A !important;
+}
+
+/* ---- Slider ---- */
+.stSlider [data-baseweb="slider"] div[role="slider"] {
+    background-color: #2D2722 !important;
+}
+
+/* ---- Tabs ---- */
+.stTabs [data-baseweb="tab-list"] {
+    border-bottom: 1px solid #EFEFEF !important;
+}
+
+/* ---- Radio ---- */
+.stRadio [data-baseweb="radio"] label span {
+    color: #4A4A4A !important;
+}
+
+/* ---- Status Container ---- */
+.stStatusWidget {
+    border: 1px solid #EFEFEF !important;
+    border-radius: 18px !important;
+}
+
+/* ---- Toast ---- */
+div[data-testid="stToast"] {
+    background-color: #FFFFFF !important;
+    border: 1px solid #EFEFEF !important;
+    border-radius: 18px !important;
+}
+
+/* ---- Code ---- */
+code {
+    color: #2D2722 !important;
+    background-color: #F5F5F2 !important;
+    border-radius: 6px !important;
+}
+
+/* ---- Alert boxes ---- */
+div[data-testid="stAlert"] {
+    border-radius: 18px !important;
+}
+
+/* ---- DataFrame / Table ---- */
+.stDataFrame, .stDataFrame th, .stDataFrame td {
+    border-color: #EFEFEF !important;
+}
+
+/* ---- 看板与侧边栏：绝对不跳动 ---- */
+section[data-testid="stSidebar"], div[data-testid="stSidebarContent"] {
+    transition: none !important;
+}
+section[data-testid="stSidebar"] * {
+    transition: none !important;
+}
+
+/* ---- 组件间距 ---- */
+.block-container {
+    gap: 20px !important;
+}
+
+/* ---- 大屏内部虚线卡片（数据展示细格） ---- */
+.creamy-inner-card {
+    border: 1px dashed #D3D3D3 !important;
+    border-radius: 14px !important;
+    padding: 16px 20px !important;
+    background-color: #FFFFFF !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================
 # 环境变量检查
 # ============================================================
 def check_api_key():
@@ -154,12 +456,155 @@ def render_api_key_warning():
 
 
 # ============================================================
+# 登录/注册页面
+# ============================================================
+def render_login_page():
+    """渲染登录/注册页面 —— Creamy Clean 奶油风"""
+    # 登录页居中
+    st.markdown("""
+    <style>
+    .login-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80vh;
+    }
+    .login-card {
+        background: #FFFFFF;
+        border: 1px solid #EFEFEF;
+        border-radius: 24px;
+        padding: 48px 40px;
+        max-width: 420px;
+        width: 100%;
+        box-shadow: 0 4px 24px rgba(45, 39, 34, 0.06);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col_left, col_center, col_right = st.columns([1, 3, 1])
+    with col_center:
+        st.markdown(
+            "<h1 style='text-align:center;font-size:2.4rem;font-weight:700;color:#2D2722;margin-bottom:4px;'>"
+            "HireInsight</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='text-align:center;color:#7A7A7A;font-size:0.95rem;margin-bottom:32px;'>"
+            "智能求职辅助系统</p>",
+            unsafe_allow_html=True,
+        )
+
+        # 登录/注册切换标签
+        tabs = st.tabs(["登录", "注册"])
+
+        # ---------- 登录 ----------
+        with tabs[0]:
+            with st.container(border=False):
+                login_username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
+                login_password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
+                st.markdown("")
+                if st.button("登录", use_container_width=True, key="btn_login"):
+                    if not login_username or not login_password:
+                        st.error("请输入用户名和密码")
+                    else:
+                        user = verify_login(login_username, login_password, _DB_PATH)
+                        if user:
+                            login_user(user)
+                            st.toast(f"欢迎回来，{user['display_name']}！", icon="🎉")
+                            st.rerun()
+                        else:
+                            st.error("用户名或密码错误")
+
+        # ---------- 注册 ----------
+        with tabs[1]:
+            with st.container(border=False):
+                reg_username = st.text_input("用户名", placeholder="3-32 位字母/数字/下划线", key="reg_username")
+                reg_display = st.text_input("显示名称", placeholder="你的昵称", key="reg_display")
+                reg_password = st.text_input("密码", type="password", placeholder="至少 6 位", key="reg_password")
+                reg_confirm = st.text_input("确认密码", type="password", placeholder="再次输入密码", key="reg_confirm")
+                st.markdown("")
+                if st.button("注册", use_container_width=True, key="btn_register"):
+                    if not reg_username or not reg_password or not reg_display:
+                        st.error("请填写所有必填项")
+                    elif reg_password != reg_confirm:
+                        st.error("两次输入的密码不一致")
+                    else:
+                        ok, msg = register_user(reg_username, reg_password, reg_display, _DB_PATH)
+                        if ok:
+                            st.success(f"注册成功！请登录")
+                        else:
+                            st.error(msg)
+
+
+# ============================================================
 # 侧边栏导航
 # ============================================================
 def render_sidebar():
     """渲染侧边栏导航（与 st.session_state 双向联动）"""
     st.sidebar.title("🎯 HireInsight")
     st.sidebar.markdown("---")
+
+    # ---- 用户信息名片（奶油风大厂级）----
+    user = get_current_user()
+    if user:
+        avatar_b64 = user.get("avatar_base64")
+        # 头像 HTML
+        if avatar_b64:
+            avatar_html = (
+                f'<img src="data:image/png;base64,{avatar_b64}" '
+                f'style="width:60px;height:60px;border-radius:50%;object-fit:cover;'
+                f'border:2px solid #EFEFEF;" />'
+            )
+        else:
+            avatar_html = (
+                '<div style="width:60px;height:60px;border-radius:50%;'
+                'background:linear-gradient(135deg, #2D2722 0%, #5C4D42 100%);'
+                'display:flex;align-items:center;justify-content:center;'
+                'font-size:1.6rem;color:#FFFFFF;">👤</div>'
+            )
+
+        # 获取最近意向岗位
+        recent_pos = "尚未设置"
+        try:
+            ihist = get_interview_history(user["id"], _DB_PATH, limit=1)
+            if ihist:
+                recent_pos = ihist[0]["target_position"]
+            else:
+                lhist = get_lighthouse_history(user["id"], _DB_PATH, limit=1)
+                if lhist:
+                    recent_pos = lhist[0]["target_position"]
+        except Exception:
+            pass
+
+        user_grade = user.get("grade") or "尚未设置"
+
+        st.sidebar.markdown(
+            f"""<div style='background-color:#FFFFFF;border:1px solid #EFEFEF;
+            border-radius:18px;padding:20px 16px;margin-bottom:16px;text-align:center;'>
+            <div style='display:flex;justify-content:center;margin-bottom:12px;'>
+                {avatar_html}
+            </div>
+            <div style='color:#2D2722;font-size:1rem;font-weight:600;'>
+                {user['display_name'] or user['username']}
+            </div>
+            <div style='color:#A0A0A0;font-size:0.73rem;margin-bottom:8px;'>
+                @{user['username']}
+            </div>
+            <div style='color:#7A7A7A;font-size:0.76rem;line-height:1.8;'>
+                <div>🎯 {recent_pos}</div>
+                <div>🎓 {user_grade}</div>
+            </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.sidebar.markdown(
+            """<div style='background-color:#FFFFFF;border:1px solid #EFEFEF;border-radius:18px;
+            padding:16px 20px;margin-bottom:16px;font-size:0.88rem;'>
+            <div style='color:#7A7A7A;font-size:0.8rem;'>未登录</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
 
     # 根据 session_state 计算当前激活的 radio index，使侧边栏与按钮联动
     current_short = st.session_state.get("current_page", "首页")
@@ -179,11 +624,16 @@ def render_sidebar():
     )
 
     st.sidebar.markdown("---")
-    st.sidebar.info(
-        "**开发进度**\n"
-        "• 数据大屏：✅ 已完成\n"
-        "• 灯塔计划：✅ 已完成\n"
-        "• 面试模拟：✅ 已完成\n"
+
+    st.sidebar.markdown(
+        "<div style='border:1px solid #EFEFEF;border-radius:18px;padding:14px 16px;"
+        "font-size:0.85rem;line-height:2.0;color:#7A7A7A;background-color:#FFFFFF;'>"
+        "<span style='color:#2D2722;font-weight:600;'>开发进度</span><br>"
+        "<span style='color:#34C759;'>●</span> 数据大屏<br>"
+        "<span style='color:#34C759;'>●</span> 灯塔计划<br>"
+        "<span style='color:#34C759;'>●</span> 面试模拟"
+        "</div>",
+        unsafe_allow_html=True,
     )
 
     return page
@@ -193,72 +643,164 @@ def render_sidebar():
 # 首页
 # ============================================================
 def render_home():
-    """渲染首页"""
-    st.title("🎯 HireInsight Agent")
-    st.markdown("**智能求职辅助系统 - 让每一次面试更有准备**")
-    
+    """渲染首页 —— Creamy Clean 奶油风"""
+    user = get_current_user()
+
+    # ---- 顶部 Banner 大图（存在则视觉做减法，剔除所有文本标题与副标题）----
+    if HOME_BANNER_PATH and os.path.isfile(HOME_BANNER_PATH):
+        st.image(HOME_BANNER_PATH, use_column_width=True)
+    else:
+        st.markdown(
+            f"<h1 style='font-weight:700;font-size:2.3rem;color:#2D2722;margin-bottom:6px;"
+            f"letter-spacing:-0.03em;'>HireInsight Agent</h1>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            "<p style='color:#7A7A7A;font-size:1rem;font-weight:400;margin-bottom:6px;'>"
+            "智能求职辅助系统 — 让每一次面试更有准备</p>",
+            unsafe_allow_html=True,
+        )
+        if user:
+            st.markdown(
+                f"<p style='color:#5A8FC7;font-size:0.9rem;font-weight:400;margin-bottom:28px;'>"
+                f"👋 欢迎，{user['display_name']}</p>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown("<p style='margin-bottom:28px;'>&nbsp;</p>", unsafe_allow_html=True)
+
     st.markdown("---")
-    
-    # 功能卡片
+
+    # ============================================================
+    # 功能模块卡片
+    # ============================================================
     col1, col2, col3 = st.columns(3)
-    
+
     with col1:
-        st.markdown("### 📊 数据大屏")
-        st.markdown("实时岗位数据分析\n薪资分布可视化\n城市/学历统计")
-        if st.button("进入", key="goto_dashboard"):
-            st.session_state["current_page"] = "数据大屏"
-            st.rerun()
-    
+        with st.container(border=True):
+            st.markdown(
+                "<h3 style='color:#2D2722;font-weight:600;font-size:1.1rem;margin-top:0;'>"
+                "📊 数据大屏</h3>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='color:#7A7A7A;font-size:0.88rem;line-height:1.8;margin-bottom:18px;'>"
+                "实时岗位数据分析<br>"
+                "薪资分布可视化<br>"
+                "城市与学历统计</p>",
+                unsafe_allow_html=True,
+            )
+            if st.button("进入模块", key="goto_dashboard", use_container_width=True):
+                st.session_state["current_page"] = "数据大屏"
+                st.rerun()
+
     with col2:
-        st.markdown("### 🧭 灯塔计划")
-        st.markdown("技术倾向测评\n专属学习路径\n低年级定向规划")
-        if st.button("进入", key="goto_lighthouse"):
-            st.session_state["current_page"] = "灯塔计划"
-            st.rerun()
-    
+        with st.container(border=True):
+            st.markdown(
+                "<h3 style='color:#2D2722;font-weight:600;font-size:1.1rem;margin-top:0;'>"
+                "🧭 灯塔计划</h3>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='color:#7A7A7A;font-size:0.88rem;line-height:1.8;margin-bottom:18px;'>"
+                "技术倾向测评<br>"
+                "专属学习路径<br>"
+                "低年级定向规划</p>",
+                unsafe_allow_html=True,
+            )
+            if st.button("进入模块", key="goto_lighthouse", use_container_width=True):
+                st.session_state["current_page"] = "灯塔计划"
+                st.rerun()
+
     with col3:
-        st.markdown("### 🎤 面试模拟")
-        st.markdown("简历 Gap 诊断\nAI 生成面试题\n企业面经 RAG")
-        if st.button("进入", key="goto_interview"):
-            st.session_state["current_page"] = "面试模拟"
-            st.rerun()
-    
+        with st.container(border=True):
+            st.markdown(
+                "<h3 style='color:#2D2722;font-weight:600;font-size:1.1rem;margin-top:0;'>"
+                "🎤 面试模拟</h3>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                "<p style='color:#7A7A7A;font-size:0.88rem;line-height:1.8;margin-bottom:18px;'>"
+                "简历 Gap 诊断<br>"
+                "AI 生成面试题<br>"
+                "企业面经 RAG</p>",
+                unsafe_allow_html=True,
+            )
+            if st.button("进入模块", key="goto_interview", use_container_width=True):
+                st.session_state["current_page"] = "面试模拟"
+                st.rerun()
+
     st.markdown("---")
-    
-    # 系统状态
-    st.subheader("📋 系统状态")
-    
-    status_col1, status_col2, status_col3 = st.columns(3)
-    
-    with status_col1:
-        api_configured = check_api_key()
-        if api_configured:
-            st.success("✅ DeepSeek API 已配置")
-        else:
-            st.error("❌ DeepSeek API 未配置")
-    
-    with status_col2:
-        rag_dir = os.getenv("CHROMA_PERSIST_DIR", "./data/rag_store")
-        if os.path.exists(rag_dir):
-            st.success(f"✅ RAG 向量存储已初始化")
-        else:
-            st.info(f"📁 RAG 向量存储待初始化")
-    
-    with status_col3:
-        db_path = os.getenv("SQLITE_DB_PATH", "./data/jobs.db")
-        if os.path.exists(db_path.replace("./", os.getcwd() + "/")):
-            st.success(f"✅ 岗位数据库已就绪")
-        else:
-            st.info(f"📁 数据库待创建")
+
+    # ============================================================
+    # 系统状态优雅面板
+    # ============================================================
+    st.markdown(
+        "<p style='color:#7A7A7A;font-size:0.9rem;font-weight:500;margin-bottom:10px;'>"
+        "系统状态</p>",
+        unsafe_allow_html=True,
+    )
+
+    # 收集状态信息
+    api_configured = check_api_key()
+    api_dot = "#34C759" if api_configured else "#FF3B30"
+    api_text = "已就绪" if api_configured else "未配置"
+
+    rag_dir = os.getenv("CHROMA_PERSIST_DIR", "./data/rag_store")
+    rag_exists = os.path.exists(rag_dir)
+    rag_dot = "#34C759" if rag_exists else "#FF9F0A"
+    rag_text = "已初始化" if rag_exists else "待初始化"
+
+    db_exists = os.path.exists(_DB_PATH)
+    db_record_count = 0
+    if db_exists:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+            cursor = conn.execute("SELECT COUNT(*) FROM jobs")
+            db_record_count = cursor.fetchone()[0]
+            conn.close()
+        except Exception:
+            db_record_count = 0
+    if db_exists and db_record_count > 0:
+        db_dot = "#34C759"
+        db_text = f"已连接 · {db_record_count} 条记录"
+    elif db_exists:
+        db_dot = "#FF9F0A"
+        db_text = "已连接 · 暂无数据"
+    else:
+        db_dot = "#FF3B30"
+        db_text = "未连接"
+
+    # 渲染状态面板
+    st.markdown(
+        f"""<div style='background-color:#FFFFFF;border:1px solid #EFEFEF;border-radius:18px;
+        padding:22px 26px;font-size:0.9rem;line-height:2.2;color:#2D2722;'>
+        <span style='color:{api_dot};font-size:1.1rem;'>●</span>
+        &nbsp;DeepSeek 智能模型&nbsp;&nbsp;&nbsp;&nbsp;
+        <span style='color:#7A7A7A;'>{api_text}</span><br>
+        <span style='color:{rag_dot};font-size:1.1rem;'>●</span>
+        &nbsp;RAG 本地向量存储&nbsp;&nbsp;
+        <span style='color:#7A7A7A;'>{rag_text}</span><br>
+        <span style='color:{db_dot};font-size:1.1rem;'>●</span>
+        &nbsp;离线数仓数据库&nbsp;&nbsp;&nbsp;&nbsp;
+        <span style='color:#7A7A7A;'>{db_text}</span>
+        </div>""",
+        unsafe_allow_html=True,
+    )
 
 
 # ============================================================
-# 数据大屏模块（占位符）
+# 数据大屏模块
 # ============================================================
 def render_dashboard():
     """渲染数据大屏页面"""
-    st.title("📊 岗位数据大屏")
-    st.markdown("**实时招聘信息分析看板**")
+    # ---- 顶部 Banner 大图（存在则替代文本标题与副标题）----
+    if DASHBOARD_BANNER_PATH and os.path.isfile(DASHBOARD_BANNER_PATH):
+        st.image(DASHBOARD_BANNER_PATH, use_column_width=True)
+    else:
+        st.title("📊 岗位数据大屏")
+        st.markdown("**实时招聘信息分析看板**")
 
     # ========================================================
     # Sidebar: 大屏专用筛选区
@@ -293,17 +835,21 @@ def render_dashboard():
         help="选择学历要求，留空表示全部"
     )
 
-    # ---- 3. 公司来源（st.multiselect） ----
-    sources = _get_distinct_values_for_dashboard("source")
+    # ---- 3. 公司来源（st.multiselect，奶油风中文本地化） ----
+    SOURCE_OPTIONS = ["netease", "mihoyo"]
+    SOURCE_LABELS = {
+        "netease": "网易官方",
+        "mihoyo": "米哈游官方",
+    }
     selected_sources = st.sidebar.multiselect(
         "公司来源",
-        options=sources,
+        options=SOURCE_OPTIONS,
         default=[],
+        format_func=lambda s: SOURCE_LABELS.get(s, s),
         help="选择数据来源，留空表示全部"
     )
 
     # ---- 4. 薪资范围（st.slider 双滑块） ----
-    # 🔴 关键契约：手动解包元组 → filters["salary_min"] / filters["salary_max"]
     salary_range = st.sidebar.slider(
         "薪资范围 (k/月)",
         min_value=0,
@@ -314,7 +860,6 @@ def render_dashboard():
     )
 
     # ---- 5. 经验要求（st.slider 双滑块） ----
-    # 🔴 关键契约：手动解包元组 → filters["experience_min"] / filters["experience_max"]
     exp_range = st.sidebar.slider(
         "经验要求 (年)",
         min_value=0,
@@ -333,37 +878,25 @@ def render_dashboard():
     )
 
     # ========================================================
-    # 🔴 Step 3: filters 字典组装（Slider 元组解包契约）
+    # filters 字典组装
     # ========================================================
     filters: dict = {}
 
-    # 城市（multiselect → list，支持单值或多值）
     if selected_cities:
         filters["city"] = selected_cities
-
-    # 学历（multiselect → list）
     if selected_degrees:
         filters["degree"] = selected_degrees
-
-    # 公司来源（multiselect → list）
     if selected_sources:
         filters["source"] = selected_sources
-
-    # 🔴 薪资 Slider 元组解包：仅当用户修改默认值时添加独立标量键
     if salary_range != (0, 100):
         filters["salary_min"] = salary_range[0]
         filters["salary_max"] = salary_range[1]
-
-    # 🔴 经验 Slider 元组解包：仅当用户修改默认值时添加独立标量键
     if exp_range != (0, 20):
         filters["experience_min"] = exp_range[0]
         filters["experience_max"] = exp_range[1]
-
-    # 关键词
     if keyword.strip():
         filters["keyword"] = keyword.strip()
 
-    # ---- 存入 session_state ----
     st.session_state["dashboard_filters"] = filters
 
     # ---- 重置筛选按钮 ----
@@ -396,9 +929,9 @@ def render_dashboard():
 
     if dw_count > 0:
         st.sidebar.markdown(
-            f"<div style='font-size:0.82rem;color:#a0a0a0;line-height:1.6'>"
+            f"<div style='font-size:0.82rem;color:#7A7A7A;line-height:1.6'>"
             f"📁 <b>数仓状态</b>：离线优先模式<br>"
-            f"&nbsp;&nbsp;&nbsp;&nbsp;当前已同步 <b style='color:#00cc96'>{dw_count}</b> 条岗位"
+            f"&nbsp;&nbsp;&nbsp;&nbsp;当前已同步 <b style='color:#34C759'>{dw_count}</b> 条岗位"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -408,11 +941,6 @@ def render_dashboard():
     # ========================================================
     # 主区域：数据接入 + KPI 指标栏 + Plotly 图表看板
     # ========================================================
-
-    # --------------------------------------------------------
-    # 数据接入（严格调用中台接口，零 SQL / 零 Pandas 聚合）
-    # 使用标志位驱动，避免早期 return 阻断裂空状态下的控制台渲染
-    # --------------------------------------------------------
     _MULTI_VALUE_KEYS = {"city", "degree", "source"}
     single_filters = {k: v for k, v in filters.items() if k not in _MULTI_VALUE_KEYS}
 
@@ -422,33 +950,23 @@ def render_dashboard():
 
     if db_exists:
         try:
-            # 调用中台筛选接口（仅传入标量筛选键）
             filtered_df = query_jobs_by_filters(
                 _DB_PATH,
                 filters=single_filters if single_filters else None,
                 limit=None,
             )
-
-            # 后过滤多值键（pandas .isin()，零 SQL）
             for mkey in _MULTI_VALUE_KEYS:
                 if mkey in filters:
                     fval = filters[mkey]
                     if isinstance(fval, list) and len(fval) > 0:
                         filtered_df = filtered_df[filtered_df[mkey].isin(fval)]
-
-            # 调用中台统计接口
             stats = calculate_market_metrics(source=filtered_df)
-
             if not filtered_df.empty and stats.get("meta", {}).get("total_count", 0) > 0:
                 show_charts = True
-
         except FileNotFoundError:
             db_exists = False
             show_charts = False
 
-    # --------------------------------------------------------
-    # Step 7: 熔断降级 —— 根据数据库 / 筛选结果分级提示
-    # --------------------------------------------------------
     if not db_exists:
         st.info(
             "💡 离线数仓为空，请展开下方【🛠️ 离线数仓控制台】同步初始岗位数据。"
@@ -461,9 +979,6 @@ def render_dashboard():
     else:
         st.markdown("---")
 
-        # ========================================================
-        # Step 4: 顶部 KPI 指标栏（4 列横向卡片）
-        # ========================================================
         total_count = stats["meta"]["total_count"]
         salary_count = stats["salary"].get("count", 0)
         city_count = stats["city"].get("unique_cities", 0)
@@ -481,14 +996,9 @@ def render_dashboard():
 
         st.markdown("---")
 
-        # ========================================================
-        # Step 5: 四大 Plotly 图表（2:3 双栏布局，暗色科技风）
-        # ========================================================
         left_col, right_col = st.columns([2, 3])
 
-        # -------------------- 左侧（2/5 宽度）--------------------
         with left_col:
-            # --- 薪资分布柱状图 ---
             salary_dist = stats["salary"].get("salary_distribution", {})
             if salary_dist:
                 fig_salary = go.Figure(data=[go.Bar(
@@ -521,7 +1031,6 @@ def render_dashboard():
 
             st.markdown("---")
 
-            # --- 学历占比环形图 ---
             degree_dist = stats["degree"].get("distribution", {})
             if degree_dist:
                 degree_labels = list(degree_dist.keys())
@@ -548,12 +1057,9 @@ def render_dashboard():
                 )
                 st.plotly_chart(fig_degree, use_container_width=True)
 
-        # -------------------- 右侧（3/5 宽度）--------------------
         with right_col:
-            # --- 城市需求 Top10 水平条形图 ---
             city_top10 = stats["city"].get("top10", {})
             if city_top10:
-                # 按岗位数升序排列（Plotly 从下往上画）
                 sorted_cities = sorted(city_top10.items(), key=lambda x: x[1])
                 city_names = [c[0] for c in sorted_cities]
                 city_counts = [c[1] for c in sorted_cities]
@@ -586,7 +1092,6 @@ def render_dashboard():
 
             st.markdown("---")
 
-            # --- 经验占比环形图 ---
             exp_dist = stats["experience"].get("distribution", {})
             if exp_dist:
                 exp_labels = list(exp_dist.keys())
@@ -614,7 +1119,7 @@ def render_dashboard():
                 st.plotly_chart(fig_exp, use_container_width=True)
 
     # ========================================================
-    # Step 6: 一键采集控制台（始终可见，不受空数据库影响）
+    # 一键采集控制台
     # ========================================================
     st.markdown("---")
     with st.expander("🛠️ 离线数仓控制台", expanded=False):
@@ -622,35 +1127,29 @@ def render_dashboard():
             "⚠️ 增量更新：从大厂招聘官网抓取最新岗位数据，通过 Upsert 合并入本地离线数仓。"
             "抓取+清洗约需 1-3 分钟，请耐心等待"
         )
-
-        # 🔴 只捕获按钮状态，不做任何 st.status 操作（避免嵌套违规）
         pipeline_clicked = st.button("🔄 一键获取并更新最新数据", type="primary", use_container_width=True)
 
-    # ⚠️ st.status 必须放在 st.expander 外部，否则触发 StreamlitAPIException
     if pipeline_clicked:
-        # ---- 尝试加载爬虫模块 ----
         scraper_available = False
         try:
             from utils.scraper.netease_scraper import NetEaseScraper  # noqa: F811
-            from utils.scraper.tencent_scraper import TencentScraper  # noqa: F811
+            from utils.scraper.mihoyo_scraper import MihoyoScraper  # noqa: F811
             scraper_available = True
         except ImportError:
             pass
 
         with st.status("🔄 增量同步进行中...", expanded=True) as status:
-            # === [1/6] 初始化数仓表结构 ===
             status.update(
                 label="[1/6] 初始化数仓表结构...", state="running", expanded=True
             )
             init_sqlite_db(_DB_PATH)
 
-            # === [2/6] 爬虫抓取 ===
             raw_jobs: list[dict] = []
-            used_real_scraper = False  # 标记是否尝试了真机爬虫
+            used_real_scraper = False
 
             if scraper_available:
                 status.update(
-                    label="[2/6] 增量采集 | 实时抓取中（NetEase + Tencent）...",
+                    label="[2/6] 增量采集 | 实时抓取中（NetEase + Mihoyo）...",
                     state="running",
                     expanded=True,
                 )
@@ -663,16 +1162,15 @@ def render_dashboard():
                     st.warning(f"⚠️ 网易爬虫异常：{e}")
 
                 try:
-                    with TencentScraper(max_pages=5) as tencent_scraper:
-                        tencent_raw = tencent_scraper.crawl()
-                        st.write(f"✅ 腾讯：抓取 {len(tencent_raw)} 条")
-                        raw_jobs.extend(tencent_raw)
+                    with MihoyoScraper(max_pages=5) as mihoyo_scraper:
+                        mihoyo_raw = mihoyo_scraper.crawl()
+                        st.write(f"✅ 米哈游：抓取 {len(mihoyo_raw)} 条")
+                        raw_jobs.extend(mihoyo_raw)
                 except Exception as e:
-                    st.warning(f"⚠️ 腾讯爬虫异常：{e}")
+                    st.warning(f"⚠️ 米哈游爬虫异常：{e}")
 
                 used_real_scraper = True
 
-            # 🔄 智能容灾降级：真机爬虫失败或返回空数据 → 自动切换到本地高拟真模拟通道
             if not raw_jobs:
                 if used_real_scraper:
                     status.update(
@@ -688,12 +1186,12 @@ def render_dashboard():
                         expanded=True,
                     )
 
-                # 高拟真模拟岗位样本：7 城市 × 5 学历档次 = 35 条
                 mock_cities = ["深圳", "北京", "上海", "杭州", "成都", "广州", "武汉"]
                 mock_degrees = ["本科", "硕士", "博士", "大专", "不限"]
-                mock_companies = ["字节跳动", "腾讯", "阿里巴巴", "美团", "百度"]
+                mock_companies = ["网易", "米哈游", "阿里巴巴", "美团", "百度"]
                 for i, city in enumerate(mock_cities):
                     for j, degree in enumerate(mock_degrees):
+                        mock_source = "netease" if (i + j) % 2 == 0 else "mihoyo"
                         raw_jobs.append({
                             "id": f"mock_job_{i}_{j}",
                             "original_id": f"mock_job_{i}_{j}",
@@ -710,14 +1208,13 @@ def render_dashboard():
                             "skills": "Python, MySQL, Redis",
                             "post_url": f"https://example.com/job/{i}_{j}",
                             "work_type": "全职",
-                            "source": "mock_bytedance",
+                            "source": mock_source,
                             "published_at": "2026-06-15",
                             "updated_at": "2026-06-20",
                         })
                 st.write(f"✅ 模拟数据：生成 {len(raw_jobs)} 条")
                 scraper_available = False
 
-            # === [3/6] 增量同步 | 数据转换 ===
             status.update(
                 label="[3/6] 增量同步 | 多源数据转换（Transformer）...",
                 state="running",
@@ -725,24 +1222,20 @@ def render_dashboard():
             )
             transformed_jobs: list[dict] = []
             if scraper_available:
-                # 按来源分离转换（source 由各爬虫在去重阶段注入）
                 netease_raw = [j for j in raw_jobs if j.get("source") == "netease"]
-                tencent_raw = [j for j in raw_jobs if j.get("source") == "tencent"]
+                mihoyo_raw = [j for j in raw_jobs if j.get("source") == "mihoyo"]
                 other_raw = [j for j in raw_jobs
-                             if j not in netease_raw and j not in tencent_raw]
-
+                             if j not in netease_raw and j not in mihoyo_raw]
                 if netease_raw:
                     transformed_jobs.extend(transform_jobs(netease_raw, source="netease"))
-                if tencent_raw:
-                    transformed_jobs.extend(transform_jobs(tencent_raw, source="tencent"))
+                if mihoyo_raw:
+                    transformed_jobs.extend(transform_jobs(mihoyo_raw, source="mihoyo"))
                 if other_raw:
-                    transformed_jobs.extend(other_raw)  # 模拟数据已是标准格式
+                    transformed_jobs.extend(other_raw)
             else:
-                transformed_jobs = raw_jobs  # 模拟数据直接使用
-
+                transformed_jobs = raw_jobs
             st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
 
-            # === [4/6] 增量同步 | 数据清洗 ===
             status.update(
                 label="[4/6] 增量同步 | 正则清洗与标准化（Cleaner）...",
                 state="running",
@@ -751,7 +1244,6 @@ def render_dashboard():
             df_cleaned = clean_job_data(pd.DataFrame(transformed_jobs))
             st.write(f"✅ 清洗完成：{len(df_cleaned)} 条有效记录")
 
-            # === [5/6] 增量同步 | 数仓写入 ===
             status.update(
                 label="[5/6] 增量同步 | 写入离线数仓（Upsert）...",
                 state="running",
@@ -760,27 +1252,35 @@ def render_dashboard():
             n_written = save_to_sqlite(df_cleaned, _DB_PATH)
             st.write(f"✅ 数仓写入：{n_written} 条已持久化")
 
-            # === [6/6] 增量同步完成 ===
             status.update(
                 label="[6/6] 增量同步完成 ✅",
                 state="complete",
                 expanded=False,
             )
 
-        # 🔴 关键：清空全量缓存，防止 st.rerun() 后命中旧缓存
         st.cache_data.clear()
         st.toast("🎉 增量更新完成！本地数仓已成功合并最新岗位。", icon="🎉")
         st.rerun()
 
 
 # ============================================================
-# 灯塔计划模块（占位符）
+# 灯塔计划模块
 # ============================================================
 def render_lighthouse():
     """渲染灯塔计划页面 —— 两阶段 UI：情景测评 → 技术倾向雷达图 + Roadmap 静态看板"""
-    st.title("🧭 灯塔计划")
-    st.markdown("**为你的技术生涯点亮第一座灯塔**")
-    st.markdown("---")
+    # ---- 顶部 Banner 大图（绝对路径；不存在时文本兜底）----
+    if LIGHTHOUSE_BANNER_PATH and os.path.isfile(LIGHTHOUSE_BANNER_PATH):
+        st.image(LIGHTHOUSE_BANNER_PATH, use_column_width=True)
+    else:
+        st.title("🧭 灯塔计划")
+
+    # ---- 历史记录入口（Banner 正下方，不占横向空间）----
+    user = get_current_user()
+    if user:
+        if st.button("📜 历史记录", key="lighthouse_history_btn"):
+            st.session_state["lighthouse_history_view"] = True
+            st.session_state["lighthouse_record_detail"] = None
+            st.rerun()
 
     # ============================================================
     # 初始化 session_state 控制变量（防跨页面切换报错）
@@ -795,6 +1295,20 @@ def render_lighthouse():
         st.session_state.lighthouse_target_position = ""
     if "lighthouse_grade" not in st.session_state:
         st.session_state.lighthouse_grade = ""
+    if "lighthouse_history_view" not in st.session_state:
+        st.session_state.lighthouse_history_view = False
+    if "lighthouse_record_detail" not in st.session_state:
+        st.session_state.lighthouse_record_detail = None
+
+    # ---- 历史记录查看模式 ----
+    if st.session_state.get("lighthouse_history_view"):
+        _render_lighthouse_history()
+        return
+
+    # ---- 记录详情查看模式 ----
+    if st.session_state.get("lighthouse_record_detail"):
+        _render_lighthouse_record_detail(st.session_state["lighthouse_record_detail"])
+        return
 
     # ============================================================
     # 阶段二：结果看板渲染
@@ -807,6 +1321,23 @@ def render_lighthouse():
             grade=st.session_state.lighthouse_grade,
         )
 
+        # 保存历史记录
+        if user and not st.session_state.get("lighthouse_saved", False):
+            try:
+                save_lighthouse_record(
+                    user_id=user["id"],
+                    target_position=st.session_state.lighthouse_target_position,
+                    grade=st.session_state.lighthouse_grade,
+                    user_answers=results.get("user_answers"),
+                    tech_tendency=results.get("tech_tendency"),
+                    roadmap=results.get("roadmap"),
+                    db_path=_DB_PATH,
+                )
+                st.session_state["lighthouse_saved"] = True
+                st.toast("✅ 测评结果已保存到历史记录", icon="💾")
+            except Exception as e:
+                st.warning(f"⚠️ 保存历史记录失败: {e}")
+
         # 重置按钮
         st.markdown("---")
         col_reset, _ = st.columns([1, 4])
@@ -817,6 +1348,7 @@ def render_lighthouse():
                 st.session_state.lighthouse_quiz_started = False
                 st.session_state.lighthouse_target_position = ""
                 st.session_state.lighthouse_grade = ""
+                st.session_state["lighthouse_saved"] = False
                 st.rerun()
         return
 
@@ -848,10 +1380,8 @@ def render_lighthouse():
                     st.error("请输入目标岗位")
                     return
 
-                # ---- 加载题库 ----
                 all_questions = get_full_question_bank()
 
-                # ---- 构造初始 State ----
                 initial_state: LighthousePlanState = {
                     "target_position": target_position.strip(),
                     "grade": grade,
@@ -867,12 +1397,10 @@ def render_lighthouse():
                     "is_completed": False,
                 }
 
-                # ---- 调用 QuestionFilterNode（st.status 包裹） ----
                 with st.status("🧠 正在分析最适合你的测评题目...", expanded=True) as status:
                     try:
                         filter_result = question_filter_node(initial_state)
                     except Exception as e:
-                        # 降级：LLM 选题失败 → 使用全部 10 题
                         filter_result = {
                             "filtered_questions": all_questions,
                             "current_step": "question_filter_failed",
@@ -880,7 +1408,6 @@ def render_lighthouse():
                         }
                     status.update(label="✅ 选题完成", state="complete")
 
-                # ---- 写入 session_state 缓存（防 re-run 重复调用 LLM） ----
                 st.session_state.lighthouse_filtered_questions = filter_result.get(
                     "filtered_questions", all_questions
                 )
@@ -888,14 +1415,13 @@ def render_lighthouse():
                 st.session_state.lighthouse_target_position = target_position.strip()
                 st.session_state.lighthouse_grade = grade
 
-                # 如果选题阶段产生了 execution_error，记录但不阻断答题
                 if filter_result.get("execution_error"):
                     st.warning(f"⚠️ {filter_result['execution_error']}")
 
                 st.rerun()
 
     # ============================================================
-    # 阶段一-步骤 2：答题表单（st.form 包裹，杜绝 radio 每次 click 重运行）
+    # 阶段一-步骤 2：答题表单
     # ============================================================
     if (
         st.session_state.lighthouse_quiz_started
@@ -906,8 +1432,7 @@ def render_lighthouse():
         st.caption("请仔细阅读每道题的情景描述，选择最符合你真实偏好的选项。没有对错之分，请诚实作答。")
 
         with st.form("lighthouse_quiz_form", clear_on_submit=False):
-            # ---- 渲染每道题 ----
-            user_selections: dict = {}  # {question_id: selected_option_index}
+            user_selections: dict = {}
 
             for idx, q in enumerate(questions):
                 qid = q["id"]
@@ -917,7 +1442,7 @@ def render_lighthouse():
 
                 option_labels = []
                 for opt_idx, opt in enumerate(q["options"]):
-                    label = f"{chr(65 + opt_idx)}. {opt['text']}"  # A. B. C. D.
+                    label = f"{chr(65 + opt_idx)}. {opt['text']}"
                     option_labels.append(label)
 
                 choice = st.radio(
@@ -930,7 +1455,6 @@ def render_lighthouse():
                 user_selections[qid] = choice
                 st.markdown("---")
 
-            # ---- 提交按钮 ----
             submitted = st.form_submit_button(
                 "📊 生成我的技术路线图",
                 type="primary",
@@ -938,13 +1462,11 @@ def render_lighthouse():
             )
 
             if submitted:
-                # 校验：所有题目必须回答
                 unanswered = [qid for qid, sel in user_selections.items() if sel is None]
                 if unanswered:
                     st.error(f"还有 {len(unanswered)} 道题目未作答，请完成所有题目后再提交")
                     return
 
-                # ---- 构造 user_answers ----
                 user_answers = []
                 for q in questions:
                     qid = q["id"]
@@ -958,7 +1480,6 @@ def render_lighthouse():
                         "tendency": opt["tendency"],
                     })
 
-                # ---- 调用 AssessmentNode（st.status 包裹） ----
                 with st.status("🧠 AI 正在评估你的技术倾向并生成学习路线图...", expanded=True) as status:
                     assess_state: LighthousePlanState = {
                         "target_position": st.session_state.lighthouse_target_position,
@@ -985,9 +1506,81 @@ def render_lighthouse():
 
                     status.update(label="✅ 评估完成", state="complete")
 
-                # ---- 存入 session_state → 触发阶段二渲染 ----
                 st.session_state.lighthouse_results = assess_result
+                st.session_state["lighthouse_saved"] = False
                 st.rerun()
+
+
+# ============================================================
+# 灯塔计划：历史记录查看
+# ============================================================
+def _render_lighthouse_history():
+    """渲染灯塔计划历史记录列表"""
+    st.subheader("📜 灯塔计划历史记录")
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    history = get_lighthouse_history(user["id"], _DB_PATH, limit=20)
+    if not history:
+        st.info("暂无历史记录，快去完成一次测评吧！")
+    else:
+        for record in history:
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([4, 1, 1])
+                with col1:
+                    st.markdown(
+                        f"**{record['target_position']}** · {record['grade']}"
+                    )
+                    st.caption(f"{record['created_at']}")
+                with col2:
+                    if st.button("查看", key=f"lighthouse_view_{record['id']}"):
+                        st.session_state["lighthouse_record_detail"] = record["id"]
+                        st.session_state["lighthouse_history_view"] = False
+                        st.rerun()
+                with col3:
+                    with st.popover("🗑️", key=f"lighthouse_popover_{record['id']}"):
+                        st.warning("确定要永久删除这条记录吗？")
+                        if st.button("确认删除", key=f"lighthouse_del_{record['id']}"):
+                            if delete_lighthouse_record(record["id"], user["id"], _DB_PATH):
+                                st.toast("已删除", icon="🗑️")
+                                st.rerun()
+
+    if st.button("⬅️ 返回测评", key="lighthouse_back"):
+        st.session_state["lighthouse_history_view"] = False
+        st.rerun()
+
+
+def _render_lighthouse_record_detail(record_id: str):
+    """渲染单条灯塔记录详情"""
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    record = get_lighthouse_record(record_id, user["id"], _DB_PATH)
+    if not record:
+        st.error("记录不存在或无权访问")
+        return
+
+    st.subheader(f"🎯 {record['target_position']} · {record['grade']} · 历史测评")
+    st.caption(f"测评时间：{record['created_at']}")
+
+    _render_lighthouse_result(
+        results={
+            "tech_tendency": record.get("tech_tendency"),
+            "roadmap": record.get("roadmap"),
+            "execution_error": None,
+        },
+        target_position=record["target_position"],
+        grade=record["grade"],
+    )
+
+    if st.button("⬅️ 返回列表", key="lighthouse_detail_back"):
+        st.session_state["lighthouse_record_detail"] = None
+        st.session_state["lighthouse_history_view"] = True
+        st.rerun()
 
 
 # ============================================================
@@ -1104,14 +1697,35 @@ def _render_radar_chart(
 # ============================================================
 def render_interview():
     """渲染面试模拟页面 —— LangGraph 拓扑工作流 + 本地 RAG 全链路"""
-    st.title("🎤 面试模拟")
-    st.markdown("**AI 驱动的简历诊断 + 定制化面试题生成**")
+    # ---- 顶部 Banner 大图（绝对路径；不存在时文本兜底）----
+    if INTERVIEW_BANNER_PATH and os.path.isfile(INTERVIEW_BANNER_PATH):
+        st.image(INTERVIEW_BANNER_PATH, use_column_width=True)
+    else:
+        st.title("🎤 面试模拟")
+
+    # ---- 历史对话入口（Banner 正下方，不占横向空间）----
+    user = get_current_user()
+    if user:
+        if st.button("📜 历史对话", key="interview_history_btn"):
+            st.session_state["interview_history_view"] = True
+            st.session_state["interview_record_detail"] = None
+            st.rerun()
 
     if not check_api_key():
         render_api_key_warning()
         return
 
     st.success("✅ DeepSeek API 已配置，可以开始面试模拟")
+
+    # ---- 历史记录查看模式 ----
+    if st.session_state.get("interview_history_view"):
+        _render_interview_history()
+        return
+
+    # ---- 记录详情查看模式 ----
+    if st.session_state.get("interview_record_detail"):
+        _render_interview_record_detail(st.session_state["interview_record_detail"])
+        return
 
     # ---- 向量库单例：确保 RAG 存储已初始化 ----
     if _get_or_init_collection is not None:
@@ -1219,6 +1833,110 @@ def render_interview():
                 "重点关注差距诊断报告中标记为 🟠 或 🔴 的维度。"
             )
 
+        # =====================================================
+        # Step 5: 保存历史记录
+        # =====================================================
+        if user:
+            try:
+                save_interview_record(
+                    user_id=user["id"],
+                    target_position=target_position,
+                    target_company=target_company or None,
+                    user_resume=user_resume,
+                    market_report=market_report,
+                    gap_analysis=gap_analysis,
+                    interview_questions=questions,
+                    db_path=_DB_PATH,
+                )
+                st.toast("✅ 面试分析已保存到历史记录", icon="💾")
+            except Exception as e:
+                st.warning(f"⚠️ 保存历史记录失败: {e}")
+
+
+# ============================================================
+# 面试模拟：历史记录查看
+# ============================================================
+def _render_interview_history():
+    """渲染面试模拟历史记录列表"""
+    st.subheader("📜 面试模拟历史记录")
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    history = get_interview_history(user["id"], _DB_PATH, limit=20)
+    if not history:
+        st.info("暂无历史记录，快去进行一次面试模拟吧！")
+    else:
+        for record in history:
+            with st.container(border=True):
+                col1, col2, col3 = st.columns([4, 1, 1])
+                with col1:
+                    company_text = f" · {record['target_company']}" if record.get('target_company') else ""
+                    st.markdown(
+                        f"**{record['target_position']}**{company_text}"
+                    )
+                    st.caption(f"{record['created_at']}")
+                with col2:
+                    if st.button("查看", key=f"interview_view_{record['id']}"):
+                        st.session_state["interview_record_detail"] = record["id"]
+                        st.session_state["interview_history_view"] = False
+                        st.rerun()
+                with col3:
+                    with st.popover("🗑️", key=f"interview_popover_{record['id']}"):
+                        st.warning("确定要永久删除这条记录吗？")
+                        if st.button("确认删除", key=f"interview_del_{record['id']}"):
+                            if delete_interview_record(record["id"], user["id"], _DB_PATH):
+                                st.toast("已删除", icon="🗑️")
+                                st.rerun()
+
+    if st.button("⬅️ 返回模拟", key="interview_back"):
+        st.session_state["interview_history_view"] = False
+        st.rerun()
+
+
+def _render_interview_record_detail(record_id: str):
+    """渲染单条面试记录详情"""
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    record = get_interview_record(record_id, user["id"], _DB_PATH)
+    if not record:
+        st.error("记录不存在或无权访问")
+        return
+
+    st.subheader(f"🎤 {record['target_position']} · 历史面试分析")
+    if record.get('target_company'):
+        st.caption(f"目标公司：{record['target_company']}")
+    st.caption(f"分析时间：{record['created_at']}")
+
+    st.markdown("---")
+
+    if record.get("market_report"):
+        st.markdown(record["market_report"])
+        st.markdown("---")
+
+    if record.get("gap_analysis"):
+        st.markdown(record["gap_analysis"])
+        st.markdown("---")
+
+    questions = record.get("interview_questions")
+    if questions:
+        st.subheader("🎯 定制化面试变形题")
+        for i, q in enumerate(questions, 1):
+            st.markdown(f"> **题目 {i}**\n>\n> {q}\n")
+        st.markdown(
+            "> 💡 **提示**：针对以上题目进行模拟练习，"
+            "重点关注差距诊断报告中标记为 🟠 或 🔴 的维度。"
+        )
+
+    if st.button("⬅️ 返回列表", key="interview_detail_back"):
+        st.session_state["interview_record_detail"] = None
+        st.session_state["interview_history_view"] = True
+        st.rerun()
+
 
 # ============================================================
 # 系统设置页面
@@ -1249,10 +1967,333 @@ def render_settings():
 
 
 # ============================================================
+# "👤 我的" —— 多用户资产管理中心
+# ============================================================
+
+def render_my_profile():
+    """渲染"我的"页面：左侧名片 + 右侧修改表单 + 历史资产管家"""
+    st.title("👤 我的")
+
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    # ============================================================
+    # 详情查看模式（优先级最高）
+    # ============================================================
+    if "profile_interview_detail" not in st.session_state:
+        st.session_state["profile_interview_detail"] = None
+    if "profile_lighthouse_detail" not in st.session_state:
+        st.session_state["profile_lighthouse_detail"] = None
+
+    if st.session_state["profile_interview_detail"]:
+        _render_my_interview_detail(st.session_state["profile_interview_detail"])
+        return
+    if st.session_state["profile_lighthouse_detail"]:
+        _render_my_lighthouse_detail(st.session_state["profile_lighthouse_detail"])
+        return
+
+    # ============================================================
+    # 上半部分：三栏横向排版 —— 名片 | 资产 | 修改表单
+    # ============================================================
+    col1, col2, col3 = st.columns([1.2, 1.8, 2], gap="large")
+
+    # ---- 加载统计 ----
+    interview_history = get_interview_history(user["id"], _DB_PATH, limit=1)
+    lighthouse_history = get_lighthouse_history(user["id"], _DB_PATH, limit=1)
+    recent_position = "尚未设置"
+    if interview_history:
+        recent_position = interview_history[0]["target_position"]
+    elif lighthouse_history:
+        recent_position = lighthouse_history[0]["target_position"]
+    total_interview = len(get_interview_history(user["id"], _DB_PATH, limit=1000))
+    total_lighthouse = len(get_lighthouse_history(user["id"], _DB_PATH, limit=1000))
+
+    # ============================================================
+    # 左栏：个人名片 + 极简上传 + 注销
+    # ============================================================
+    with col1:
+        avatar_b64 = user.get("avatar_base64")
+        if avatar_b64:
+            st.markdown(
+                f"""<div style='text-align:center;'>
+                <img src="data:image/png;base64,{avatar_b64}"
+                style='width:90px;height:90px;border-radius:50%;object-fit:cover;
+                border:2px solid #EFEFEF;' /></div>""",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                """<div style='width:90px;height:90px;border-radius:50%;
+                background:linear-gradient(135deg, #2D2722 0%, #5C4D42 100%);
+                display:flex;align-items:center;justify-content:center;
+                font-size:2.3rem;color:#FFFFFF;margin:0 auto;'>👤</div>""",
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(
+            f"""<div style='text-align:center;margin-top:10px;'>
+            <div style='color:#2D2722;font-size:1.1rem;font-weight:600;'>{user['display_name']}</div>
+            <div style='color:#7A7A7A;font-size:0.8rem;'>🎓 {user.get('grade') or '未设置'}</div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("<div style='margin-top:14px;'></div>", unsafe_allow_html=True)
+
+        # Popover 极简上传按钮
+        if "profile_avatar_processed" not in st.session_state:
+            st.session_state["profile_avatar_processed"] = False
+
+        with st.popover("📷 上传头像", use_container_width=True):
+            uploaded = st.file_uploader(
+                "选择图片", type=["png", "jpg", "jpeg"],
+                label_visibility="collapsed", key="profile_avatar_uploader",
+            )
+            if uploaded is not None and not st.session_state["profile_avatar_processed"]:
+                st.session_state["profile_avatar_processed"] = True
+                raw = uploaded.read()
+                avatar_b64_new = base64.b64encode(raw).decode("utf-8")
+                ok, _ = update_user_profile(
+                    user["id"], avatar_base64=avatar_b64_new, db_path=_DB_PATH,
+                )
+                if ok:
+                    refresh_user_session(_DB_PATH)
+                    st.toast("头像已更新 ✅", icon="🖼️")
+                    st.rerun()
+
+        st.markdown("<div style='margin-top:10px;'></div>", unsafe_allow_html=True)
+        if st.button("🚪 注销", key="my_profile_logout"):
+            logout_user()
+            st.rerun()
+
+    # ============================================================
+    # 中栏：核心资产数据置顶
+    # ============================================================
+    with col2:
+        st.markdown(
+            f"""<div style='background-color:#FFFFFF;border:1px solid #EFEFEF;
+            border-radius:18px;padding:24px 28px;height:100%;'>
+            <div style='color:#7A7A7A;font-size:0.78rem;margin-bottom:16px;
+            font-weight:500;letter-spacing:0.04em;'>📊 核心资产总览</div>
+            <div style='margin-bottom:18px;'>
+                <div style='color:#7A7A7A;font-size:0.75rem;margin-bottom:3px;'>🎯 最近目标岗位</div>
+                <div style='color:#2D2722;font-size:1.05rem;font-weight:600;'>{recent_position}</div>
+            </div>
+            <div style='margin-bottom:18px;'>
+                <div style='color:#7A7A7A;font-size:0.75rem;margin-bottom:3px;'>📜 面试模拟存档</div>
+                <div style='color:#2D2722;font-size:1.6rem;font-weight:700;line-height:1;'>{total_interview} <span style='font-size:0.85rem;font-weight:400;color:#7A7A7A;'>条</span></div>
+            </div>
+            <div>
+                <div style='color:#7A7A7A;font-size:0.75rem;margin-bottom:3px;'>🧭 灯塔计划存档</div>
+                <div style='color:#2D2722;font-size:1.6rem;font-weight:700;line-height:1;'>{total_lighthouse} <span style='font-size:0.85rem;font-weight:400;color:#7A7A7A;'>条</span></div>
+            </div>
+            </div>""",
+            unsafe_allow_html=True,
+        )
+
+    # ============================================================
+    # 右栏：紧凑版资料修改表单
+    # ============================================================
+    with col3:
+        grade_options = ["大一", "大二", "大三", "大四", "研一", "研二", "研三", "博士", "已毕业"]
+        current_grade = user.get("grade") or "未设置"
+        try:
+            grade_index = grade_options.index(current_grade)
+        except ValueError:
+            grade_index = 0
+
+        with st.form("profile_edit_form", clear_on_submit=False):
+            st.caption("✏️ 修改资料")
+            new_display_name = st.text_input(
+                "显示名称", value=user["display_name"],
+            )
+            new_grade = st.selectbox(
+                "当前年级", options=grade_options, index=grade_index,
+            )
+            submitted = st.form_submit_button("💾 保存修改", use_container_width=True)
+            if submitted:
+                ok, msg = update_user_profile(
+                    user["id"],
+                    display_name=new_display_name,
+                    grade=new_grade,
+                    db_path=_DB_PATH,
+                )
+                if ok:
+                    refresh_user_session(_DB_PATH)
+                    st.toast("资料已保存 ✅", icon="💾")
+                    st.rerun()
+                else:
+                    st.error(msg)
+
+    st.markdown("---")
+
+    # ============================================================
+    # 下半部分：历史资产管家（双 Tab）
+    # ============================================================
+    tab1, tab2 = st.tabs(["📜 面试模拟历史", "🧭 灯塔计划历史"])
+
+    with tab1:
+        _render_my_interview_tab(user)
+
+    with tab2:
+        _render_my_lighthouse_tab(user)
+
+
+def _render_my_interview_tab(user: dict):
+    """渲染「我的」页面面试历史 Tab"""
+    history = get_interview_history(user["id"], _DB_PATH, limit=50)
+    if not history:
+        st.markdown(
+            "<div style='text-align:center;padding:48px 24px;color:#7A7A7A;'>"
+            "<div style='font-size:3rem;margin-bottom:12px;'>✨</div>"
+            "<div style='font-size:1.05rem;'>还没有保存过面试模拟记录呢</div>"
+            "<div style='font-size:0.9rem;margin-top:6px;'>快去"
+            "<span style='color:#2D2722;font-weight:600;'>【面试模拟】</span>"
+            "开启你的第一步吧！</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    for record in history:
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([4, 1, 1])
+            with col1:
+                company_text = f" · {record['target_company']}" if record.get('target_company') else ""
+                st.markdown(f"**{record['target_position']}**{company_text}")
+                st.caption(record["created_at"])
+            with col2:
+                if st.button("查看", key=f"my_interview_view_{record['id']}"):
+                    st.session_state["profile_interview_detail"] = record["id"]
+                    st.rerun()
+            with col3:
+                with st.popover("🗑️", key=f"my_interview_popover_{record['id']}"):
+                    st.warning("确定要永久删除这条记录吗？")
+                    if st.button("确认删除", key=f"my_interview_del_{record['id']}"):
+                        if delete_interview_record(record["id"], user["id"], _DB_PATH):
+                            st.toast("已删除", icon="🗑️")
+                            st.rerun()
+
+
+def _render_my_lighthouse_tab(user: dict):
+    """渲染「我的」页面灯塔历史 Tab"""
+    history = get_lighthouse_history(user["id"], _DB_PATH, limit=50)
+    if not history:
+        st.markdown(
+            "<div style='text-align:center;padding:48px 24px;color:#7A7A7A;'>"
+            "<div style='font-size:3rem;margin-bottom:12px;'>✨</div>"
+            "<div style='font-size:1.05rem;'>还没有保存过灯塔计划记录呢</div>"
+            "<div style='font-size:0.9rem;margin-top:6px;'>快去"
+            "<span style='color:#2D2722;font-weight:600;'>【灯塔计划】</span>"
+            "开启你的第一步吧！</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    for record in history:
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([4, 1, 1])
+            with col1:
+                st.markdown(f"**{record['target_position']}** · {record['grade']}")
+                st.caption(record["created_at"])
+            with col2:
+                if st.button("查看", key=f"my_lighthouse_view_{record['id']}"):
+                    st.session_state["profile_lighthouse_detail"] = record["id"]
+                    st.rerun()
+            with col3:
+                with st.popover("🗑️", key=f"my_lighthouse_popover_{record['id']}"):
+                    st.warning("确定要永久删除这条记录吗？")
+                    if st.button("确认删除", key=f"my_lighthouse_del_{record['id']}"):
+                        if delete_lighthouse_record(record["id"], user["id"], _DB_PATH):
+                            st.toast("已删除", icon="🗑️")
+                            st.rerun()
+
+
+def _render_my_interview_detail(record_id: str):
+    """渲染「我的」页面面试记录详情"""
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    record = get_interview_record(record_id, user["id"], _DB_PATH)
+    if not record:
+        st.error("记录不存在或无权访问")
+        st.session_state["profile_interview_detail"] = None
+        return
+
+    st.subheader(f"🎤 {record['target_position']} · 历史面试分析")
+    if record.get('target_company'):
+        st.caption(f"目标公司：{record['target_company']}")
+    st.caption(f"分析时间：{record['created_at']}")
+    st.markdown("---")
+
+    if record.get("market_report"):
+        st.markdown(record["market_report"])
+        st.markdown("---")
+    if record.get("gap_analysis"):
+        st.markdown(record["gap_analysis"])
+        st.markdown("---")
+
+    questions = record.get("interview_questions")
+    if questions:
+        st.subheader("🎯 定制化面试变形题")
+        for i, q in enumerate(questions, 1):
+            st.markdown(f"> **题目 {i}**\n>\n> {q}\n")
+
+    if st.button("⬅️ 返回我的", key="my_interview_detail_back"):
+        st.session_state["profile_interview_detail"] = None
+        st.rerun()
+
+
+def _render_my_lighthouse_detail(record_id: str):
+    """渲染「我的」页面灯塔记录详情"""
+    user = get_current_user()
+    if not user:
+        st.warning("请先登录")
+        return
+
+    record = get_lighthouse_record(record_id, user["id"], _DB_PATH)
+    if not record:
+        st.error("记录不存在或无权访问")
+        st.session_state["profile_lighthouse_detail"] = None
+        return
+
+    st.subheader(f"🎯 {record['target_position']} · {record['grade']} · 历史测评")
+    st.caption(f"测评时间：{record['created_at']}")
+
+    _render_lighthouse_result(
+        results={
+            "tech_tendency": record.get("tech_tendency"),
+            "roadmap": record.get("roadmap"),
+            "execution_error": None,
+        },
+        target_position=record["target_position"],
+        grade=record["grade"],
+    )
+
+    if st.button("⬅️ 返回我的", key="my_lighthouse_detail_back"):
+        st.session_state["profile_lighthouse_detail"] = None
+        st.rerun()
+
+
+# ============================================================
 # 主函数
 # ============================================================
 def main():
-    """主函数 —— 双向路由：侧边栏 radio ↔ 首页按钮联动"""
+    """主函数 —— 双向路由 + 登录保护"""
+    # 初始化认证表和历史表（幂等，只执行一次）
+    init_auth(_DB_PATH)
+    init_history(_DB_PATH)
+
+    # 未登录 → 展示登录/注册页
+    if not is_logged_in():
+        render_login_page()
+        return
+
     # 初始化 session_state
     if "current_page" not in st.session_state:
         st.session_state["current_page"] = "首页"
@@ -1275,6 +2316,7 @@ def main():
         "📊 数据大屏": render_dashboard,
         "🧭 灯塔计划": render_lighthouse,
         "🎤 面试模拟": render_interview,
+        "👤 我的": render_my_profile,
         "⚙️ 系统设置": render_settings,
     }
 

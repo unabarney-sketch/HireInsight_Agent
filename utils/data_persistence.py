@@ -414,7 +414,7 @@ def query_jobs_by_filters(
         company         —— 精确匹配（如 "字节跳动"）
         category        —— 精确匹配（如 "技术"）
         work_type       —— 精确匹配（如 "全职"）
-        source          —— 精确匹配（如 "bytedance"）
+        source          —— 精确匹配（如 "netease"）
         experience_min  —— 经验年限下限（>=）
         experience_max  —— 经验年限上限（<=）
         salary_min      —— 薪资下限（>=）
@@ -588,9 +588,9 @@ if __name__ == "__main__":
     print("=" * 60)
     test_df = pd.DataFrame([
         {
-            "id": "bytedance_001", "source": "bytedance", "original_id": "001",
+            "id": "netease_001", "source": "netease", "original_id": "001",
             "title": "Python后端", "title_raw": "Python后端开发工程师",
-            "company": "字节跳动", "department": "抖音研发部",
+            "company": "网易", "department": "研发部",
             "category": "技术", "sub_category": "后端",
             "city": "深圳", "city_raw": "深圳", "district": "南山区",
             "salary_raw": "25k-45k·15薪", "salary_min": 25.0, "salary_max": 45.0,
@@ -598,16 +598,16 @@ if __name__ == "__main__":
             "experience_min": 3, "experience_max": 5, "experience_raw": "3-5年",
             "degree": "本科", "degree_raw": "本科及以上",
             "work_type": "全职",
-            "duty": "负责抖音推荐系统开发", "requirement": "熟悉Python/Golang",
+            "duty": "负责网易推荐系统开发", "requirement": "熟悉Python/Golang",
             "skills": "Python, Go, MySQL",
-            "post_url": "https://jobs.bytedance.com/job/001",
+            "post_url": "https://hr.163.com/job-detail.html?id=001",
             "published_at": "2025-06-01", "updated_at": "2025-06-15",
             "created_at": "2025-07-02 21:00:00", "crawl_batch": "20250702_210000",
         },
         {
-            "id": "tencent_002", "source": "tencent", "original_id": "002",
+            "id": "mihoyo_002", "source": "mihoyo", "original_id": "002",
             "title": "Python后台", "title_raw": "Python后台开发",
-            "company": "腾讯", "department": "CSIG",
+            "company": "米哈游", "department": "游戏研发部",
             "category": "技术", "sub_category": "",
             "city": "深圳", "city_raw": "深圳市", "district": "",
             "salary_raw": "200-300元/天", "salary_min": 4.4, "salary_max": 6.6,
@@ -615,17 +615,17 @@ if __name__ == "__main__":
             "experience_min": 0, "experience_max": 0, "experience_raw": "在校生/应届生",
             "degree": "本科", "degree_raw": "本科",
             "work_type": "实习",
-            "duty": "负责腾讯云后台开发", "requirement": "熟悉Python",
+            "duty": "负责米哈游游戏后台开发", "requirement": "熟悉Python",
             "skills": "Python, C++",
-            "post_url": "https://careers.tencent.com/job/002",
+            "post_url": "https://jobs.mihoyo.com/job-detail/002",
             "published_at": "", "updated_at": "2025-06-15 10:30:00",
             "created_at": "2025-07-02 21:00:00", "crawl_batch": "20250702_210000",
         },
         # 意图重复记录：测试 Upsert 更新逻辑
         {
-            "id": "bytedance_001_v2", "source": "bytedance", "original_id": "001",
+            "id": "netease_001_v2", "source": "netease", "original_id": "001",
             "title": "Python后端(更新)", "title_raw": "Python后端开发工程师(更新)",
-            "company": "字节跳动", "department": "抖音研发部",
+            "company": "网易", "department": "研发部",
             "category": "技术", "sub_category": "后端",
             "city": "深圳", "city_raw": "深圳", "district": "南山区",
             "salary_raw": "30k-50k·15薪", "salary_min": 30.0, "salary_max": 50.0,
@@ -633,9 +633,9 @@ if __name__ == "__main__":
             "experience_min": 3, "experience_max": 5, "experience_raw": "3-5年",
             "degree": "本科", "degree_raw": "本科及以上",
             "work_type": "全职",
-            "duty": "负责抖音推荐系统开发", "requirement": "熟悉Python/Golang",
+            "duty": "负责网易推荐系统开发", "requirement": "熟悉Python/Golang",
             "skills": "Python, Go, MySQL",
-            "post_url": "https://jobs.bytedance.com/job/001",
+            "post_url": "https://hr.163.com/job-detail.html?id=001",
             "published_at": "2025-07-01", "updated_at": "2025-07-02",
             "created_at": "2025-07-03 09:00:00", "crawl_batch": "20250703_090000",
         },

@@ -529,7 +529,7 @@ if __name__ == "__main__":
     test_df = pd.DataFrame({
         "city": np.random.choice(cities_choices, n),
         "degree": np.random.choice(degree_choices, n),
-        "source": np.random.choice(["bytedance", "tencent"], n),
+        "source": np.random.choice(["netease", "mihoyo"], n),
         "salary_min": np.random.uniform(5, 40, n),
         "salary_max": np.random.uniform(10, 80, n),
         "experience_min": np.random.choice([e[1] for e in exp_choices], n),

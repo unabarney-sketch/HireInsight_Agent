@@ -690,9 +690,9 @@ if __name__ == "__main__":
     print("=" * 60)
     sample_df = pd.DataFrame([
         {
-            "source": "bytedance", "original_id": "001",
-            "title_raw": "Python后端", "company": "字节跳动",
-            "department": "抖音研发部", "category": "技术",
+            "source": "netease", "original_id": "001",
+            "title_raw": "Python后端", "company": "网易",
+            "department": "研发部", "category": "技术",
             "sub_category": "后端", "city_raw": "深圳",
             "district": "南山区", "salary_raw": "25k-45k·15薪",
             "experience_raw": "3-5年", "degree_raw": "本科及以上",
@@ -701,10 +701,10 @@ if __name__ == "__main__":
             "skills": "Python, Go", "post_url": "https://...",
         },
         {
-            "source": "tencent", "original_id": "002",
-            "title_raw": "Python后台开发", "company": "腾讯",
-            "department": "CSIG", "category": "技术",
-            "sub_category": "", "city_raw": "深圳市",
+            "source": "mihoyo", "original_id": "002",
+            "title_raw": "Python后台开发", "company": "米哈游",
+            "department": "游戏研发部", "category": "技术",
+            "sub_category": "", "city_raw": "上海市",
             "district": "", "salary_raw": "200-300元/天",
             "experience_raw": "经验不限", "degree_raw": "本科",
             "work_type": "实习",
@@ -712,7 +712,7 @@ if __name__ == "__main__":
             "skills": "", "post_url": "https://...",
         },
         {
-            "source": "bytedance", "original_id": "003",
+            "source": "mihoyo", "original_id": "003",
             "title_raw": "", "company": "",
             "department": "", "category": "技术",
             "sub_category": "", "city_raw": "",

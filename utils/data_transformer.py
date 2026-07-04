@@ -6,7 +6,7 @@ utils/data_transformer.py
 
 功能定位
 --------
-    本模块位于"原始爬虫层"与"数据清洗层"之间，负责将网易和腾讯
+    本模块位于"原始爬虫层"与"数据清洗层"之间，负责将网易和米哈游
     两套异构的原始字典结构统一转换为标准中间字典。
 
 设计模式：策略模式（Strategy Pattern）
@@ -15,7 +15,7 @@ utils/data_transformer.py
 
 转换契约
 --------
-    1. 输入：原始爬虫返回的 list[dict]（网易 / 腾讯 / 字节跳动各自的结构）
+    1. 输入：原始爬虫返回的 list[dict]（网易 / 米哈游各自的结构）
     2. 输出：标准中间字典，包含以下固定 Key：
        source, original_id, title_raw, company, department,
        category, sub_category, city_raw, district,
@@ -83,210 +83,111 @@ def _empty_record(source: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 字节跳动 → 标准映射
+# 米哈游 → 标准映射
 # ---------------------------------------------------------------------------
 
-def _transform_bytedance(raw: dict[str, Any]) -> dict[str, Any]:
+def _transform_mihoyo(raw: dict[str, Any]) -> dict[str, Any]:
     """
-    将字节跳动原始岗位字典转换为标准中间格式。
+    将米哈游招聘原始岗位字典转换为标准中间格式。
 
-    映射关系（按设计文档 v1.0 §1.1.3）：
-        source       → "bytedance"
-        original_id  → raw["job_id"]
-        title_raw    → raw["title"]
-        company      → "字节跳动"（硬编码）
-        department   → raw.department.name
-        category     → raw.job_category.parent.name（技术/产品/运营...）
-        sub_category → raw.job_category.name（后端/前端...）
-        city_raw     → raw.city_info.name
-        district     → raw.city_info.district
-        salary_raw   → raw.salary.show_salary（保留脏数据）
-        experience_raw → raw.experience.name
-        degree_raw   → raw.degree.name
-        work_type    → raw.recruit_type.parent.name
-        duty         → raw["duty"]
+    映射关系：
+        source       → "mihoyo"
+        original_id  → raw["id"]
+        title_raw    → raw["name"]
+        company      → "米哈游"（硬编码）
+        department   → raw["firstDepName"]
+        category     → raw["firstPostTypeName"]
+        sub_category → ""（米哈游无细类）
+        city_raw     → workPlaceNameList[0] 或逗号拼接
+        district     → ""（米哈游接口无行政区）
+        salary_raw   → raw.get("salaryRange", "")（若有薪资字段）
+        experience_raw → raw["reqWorkYearsName"]
+        degree_raw   → raw["reqEducationName"]
+        work_type    → "全职" / "实习"（按 workType 映射）
+        duty         → raw["description"]
         requirement  → raw["requirement"]
-        skills       → raw["tags"]（数组 → 逗号拼接）
-        post_url     → raw["post_url"]
+        skills       → ""（米哈游无标签字段）
+        post_url     → f"https://jobs.mihoyo.com/job-detail/{id}"
 
     Parameters
     ----------
     raw : dict
-        字节跳动 API 返回的单条原始岗位字典（data.jobs[] 元素）
+        米哈游招聘 API 返回的单条原始岗位字典（data.list[] 元素）
 
     Returns
     -------
     dict
         标准中间字典（字段全部非 None）
     """
-    record = _empty_record(source="bytedance")
+    from datetime import datetime, timezone
+
+    record = _empty_record(source="mihoyo")
 
     # ---- 基础标识 ----
-    record["original_id"] = str(raw.get("job_id", "")).strip()
+    job_id = raw.get("id")
+    record["original_id"] = str(job_id).strip() if job_id is not None else ""
 
     # ---- 岗位名称 ----
-    record["title_raw"] = str(raw.get("title", "")).strip()
+    record["title_raw"] = str(raw.get("name", "")).strip()
 
     # ---- 公司（硬编码） ----
-    record["company"] = "字节跳动"
+    record["company"] = "米哈游"
 
     # ---- 部门 ----
-    dept = raw.get("department") or {}
-    record["department"] = str(dept.get("name", "")).strip() if isinstance(dept, dict) else ""
+    record["department"] = str(raw.get("firstDepName", "")).strip()
 
     # ---- 职位类别 ----
-    job_cat = raw.get("job_category") or {}
-    if isinstance(job_cat, dict):
-        parent_cat = job_cat.get("parent") or {}
-        record["category"] = str(parent_cat.get("name", "")).strip() if isinstance(parent_cat, dict) else ""
-        record["sub_category"] = str(job_cat.get("name", "")).strip()
-    else:
-        record["category"] = ""
-        record["sub_category"] = ""
+    record["category"] = str(raw.get("firstPostTypeName", "")).strip()
+    record["sub_category"] = ""           # 米哈游无细类
 
-    # ---- 城市与行政区 ----
-    city_info = raw.get("city_info") or {}
-    if isinstance(city_info, dict):
-        record["city_raw"] = str(city_info.get("name", "")).strip()
-        record["district"] = str(city_info.get("district", "")).strip()
+    # ---- 城市（从 workPlaceNameList 提取） ----
+    wp_list = raw.get("workPlaceNameList", [])
+    if isinstance(wp_list, list) and wp_list:
+        record["city_raw"] = ", ".join(str(c) for c in wp_list if c)
+        record["district"] = ""
     else:
         record["city_raw"] = ""
         record["district"] = ""
 
-    # ---- 原始薪资串 ----
-    salary = raw.get("salary") or {}
-    if isinstance(salary, dict):
-        record["salary_raw"] = str(salary.get("show_salary", "")).strip()
-    else:
-        record["salary_raw"] = ""
+    # ---- 薪资（米哈游接口可能返回薪资范围） ----
+    record["salary_raw"] = str(raw.get("salaryRange", "")).strip()
 
     # ---- 经验要求 ----
-    experience = raw.get("experience") or {}
-    if isinstance(experience, dict):
-        record["experience_raw"] = str(experience.get("name", "")).strip()
-    else:
-        record["experience_raw"] = ""
+    record["experience_raw"] = str(raw.get("reqWorkYearsName", "")).strip()
 
     # ---- 学历要求 ----
-    degree = raw.get("degree") or {}
-    if isinstance(degree, dict):
-        record["degree_raw"] = str(degree.get("name", "")).strip()
-    else:
-        record["degree_raw"] = ""
+    record["degree_raw"] = str(raw.get("reqEducationName", "")).strip()
 
-    # ---- 工作类型 ----
-    recruit_type = raw.get("recruit_type") or {}
-    if isinstance(recruit_type, dict):
-        parent_rt = recruit_type.get("parent") or {}
-        record["work_type"] = str(parent_rt.get("name", "")).strip() if isinstance(parent_rt, dict) else ""
-    else:
-        record["work_type"] = ""
+    # ---- 工作类型（workType: "0"=全职, "1"=实习） ----
+    wt = str(raw.get("workType", "")).strip()
+    record["work_type"] = {"0": "全职", "1": "实习"}.get(wt, "")
 
     # ---- 文本内容 ----
-    record["duty"] = str(raw.get("duty", "")).strip()
+    record["duty"] = str(raw.get("description", "")).strip()
     record["requirement"] = str(raw.get("requirement", "")).strip()
 
-    # ---- 技能标签（数组 → 逗号拼接） ----
-    tags = raw.get("tags", [])
-    if isinstance(tags, list):
-        record["skills"] = ", ".join(str(t) for t in tags if t)
-    else:
-        record["skills"] = ""
+    # ---- 技能标签（米哈游无此字段） ----
+    record["skills"] = ""
 
     # ---- 链接 ----
-    record["post_url"] = str(raw.get("post_url", "")).strip()
+    if record["original_id"]:
+        record["post_url"] = (
+            f"https://jobs.mihoyo.com/job-detail/{record['original_id']}"
+        )
 
-    # ---- 时间 ----
-    record["published_at"] = str(raw.get("publish_time", "")).strip()
-
-    return record
-
-
-# ---------------------------------------------------------------------------
-# 腾讯 → 标准映射
-# ---------------------------------------------------------------------------
-
-def _transform_tencent(raw: dict[str, Any]) -> dict[str, Any]:
-    """
-    将腾讯招聘原始岗位字典转换为标准中间格式。
-
-    映射关系（按设计文档 v1.0 §1.2.5）：
-        source       → "tencent"
-        original_id  → raw["postId"]
-        title_raw    → raw["RecruitPostName"]
-        company      → "腾讯"（硬编码）
-        department   → raw["BGName"]（CSIG / IEG / WXG ...）
-        category     → raw["CategoryName"]
-        sub_category → ""（腾讯接口无细类）
-        city_raw     → raw["LocationName"]
-        district     → ""（腾讯接口无行政区）
-        salary_raw   → raw["Salary"]（含绩效：25k-40k·14薪）
-        experience_raw → raw["RequireWorkYearsName"]
-        degree_raw   → raw["DegreeName"]
-        work_type    → raw["WorkType"]
-        duty         → raw["Responsibility"]
-        requirement  → raw["Requirement"]
-        skills       → raw["Tags"]（数组 → 逗号拼接）
-        post_url     → raw["PostURL"]
-
-    Parameters
-    ----------
-    raw : dict
-        腾讯招聘 API 返回的单条完整岗位字典（列表字段 + 详情字段已合并）
-
-    Returns
-    -------
-    dict
-        标准中间字典（字段全部非 None）
-    """
-    record = _empty_record(source="tencent")
-
-    # ---- 基础标识 ----
-    record["original_id"] = str(raw.get("postId", "")).strip()
-
-    # ---- 岗位名称 ----
-    record["title_raw"] = str(raw.get("RecruitPostName", "")).strip()
-
-    # ---- 公司（硬编码） ----
-    record["company"] = "腾讯"
-
-    # ---- 部门（事业群） ----
-    record["department"] = str(raw.get("BGName", "")).strip()
-
-    # ---- 职位类别 ----
-    record["category"] = str(raw.get("CategoryName", "")).strip()
-    record["sub_category"] = ""           # 腾讯无细类
-
-    # ---- 城市 ----
-    record["city_raw"] = str(raw.get("LocationName", "")).strip()
-    record["district"] = ""               # 腾讯无行政区字段
-
-    # ---- 原始薪资串 ----
-    record["salary_raw"] = str(raw.get("Salary", "")).strip()
-
-    # ---- 经验要求 ----
-    record["experience_raw"] = str(raw.get("RequireWorkYearsName", "")).strip()
-
-    # ---- 学历要求 ----
-    record["degree_raw"] = str(raw.get("DegreeName", "")).strip()
-
-    # ---- 工作类型 ----
-    record["work_type"] = str(raw.get("WorkType", "")).strip()
-
-    # ---- 文本内容 ----
-    record["duty"] = str(raw.get("Responsibility", "")).strip()
-    record["requirement"] = str(raw.get("Requirement", "")).strip()
-
-    # ---- 技能标签（数组 → 逗号拼接） ----
-    tags = raw.get("Tags", [])
-    if isinstance(tags, list):
-        record["skills"] = ", ".join(str(t) for t in tags if t)
+    # ---- 时间（updateTime 为毫秒时间戳） ----
+    ts_ms = raw.get("updateTime")
+    if ts_ms is not None and isinstance(ts_ms, (int, float)):
+        try:
+            dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+            record["published_at"] = dt.strftime("%Y-%m-%d")
+            record["updated_at"] = dt.strftime("%Y-%m-%d")
+        except (OSError, ValueError):
+            record["published_at"] = ""
+            record["updated_at"] = ""
     else:
-        record["skills"] = ""
-
-    # ---- 链接与时间 ----
-    record["post_url"] = str(raw.get("PostURL", "")).strip()
-    record["updated_at"] = str(raw.get("LastUpdateTime", "")).strip()
+        record["published_at"] = ""
+        record["updated_at"] = ""
 
     return record
 
@@ -407,9 +308,8 @@ def _transform_netease(raw: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _TRANSFORMERS: dict[str, Any] = {
-    "bytedance": _transform_bytedance,
-    "tencent": _transform_tencent,
     "netease": _transform_netease,
+    "mihoyo": _transform_mihoyo,
 }
 
 _VALID_SOURCES: set[str] = set(_TRANSFORMERS.keys())
@@ -425,9 +325,8 @@ def transform_jobs(raw_list: list[dict], source: str) -> list[dict]:
 
     策略路由
     --------
-        source="bytedance" → _transform_bytedance()
-        source="tencent"   → _transform_tencent()
-        source="netease"   → _transform_netease()
+        source="netease" → _transform_netease()
+        source="mihoyo"  → _transform_mihoyo()
 
     容错机制
     --------
@@ -437,9 +336,9 @@ def transform_jobs(raw_list: list[dict], source: str) -> list[dict]:
     Parameters
     ----------
     raw_list : list[dict]
-        原始爬虫返回的岗位字典列表（字节跳动或腾讯格式）
+        原始爬虫返回的岗位字典列表（网易或米哈游格式）
     source : str
-        数据来源标识，必须是 "bytedance" 或 "tencent"
+        数据来源标识，必须是 "netease" 或 "mihoyo"
 
     Returns
     -------
