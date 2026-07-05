@@ -86,9 +86,11 @@ class TencentScraper:
         self,
         page_size: int = _DEFAULT_PAGE_SIZE,
         max_pages: int = _DEFAULT_MAX_PAGES,
+        keyword: str | None = None,
     ) -> None:
         self.page_size = page_size
         self.max_pages = max_pages
+        self.keyword = keyword
         self._logger = logging.getLogger(f"{__name__}.tencent")
         self._total_count: int = 0
 
@@ -110,8 +112,9 @@ class TencentScraper:
     async def _crawl_async(self) -> list[dict]:
         from playwright.async_api import async_playwright
 
-        print("[Tencent] ========== 腾讯招聘爬虫启动 (Playwright) ==========")
-        print(f"[Tencent] page_size={self.page_size} | max_pages={self.max_pages}")
+        kw_info = f" | keyword={self.keyword}" if self.keyword else " (全量)"
+        print(f"[Tencent] ========== 腾讯招聘爬虫启动 (Playwright) ==========")
+        print(f"[Tencent] page_size={self.page_size} | max_pages={self.max_pages}{kw_info}")
 
         all_jobs: list[dict] = []
         seen_ids: set[str] = set()
@@ -141,12 +144,12 @@ class TencentScraper:
             page.on("response", handle_response)
 
             try:
-                # 打开首页
-                await page.goto(
-                    "https://careers.tencent.com/search.html",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
+                # 打开首页（如有关键词则附加到 URL）
+                target_url = "https://careers.tencent.com/search.html"
+                if self.keyword:
+                    from urllib.parse import quote
+                    target_url += f"?keyword={quote(self.keyword)}"
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(3000)
 
                 # 逐页点击"下一页"按钮触发 SPA 分页

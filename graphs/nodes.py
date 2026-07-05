@@ -316,7 +316,16 @@ def interviewer_agent_node(state: InterviewState) -> InterviewState:
         "**追问方向**：{面试官可能追问的 1-2 个方向}\n"
         "```\n"
         "- 3-5 道题，不可多也不可少\n"
-        "- 报告末尾加一行 > 💡 提示信息"
+        "- 报告末尾加一行 > 💡 提示信息\n\n"
+        "- 在提示信息之后，以 '## 🔮 建议追问方向' 为标题，列出 3 条针对候选人弱项的深挖追问标签。"
+        "每条以 '- ' 开头，必须是口语化、有行动感的具体问题或指令。\n"
+        "示例：\n"
+        "```\n"
+        "## 🔮 建议追问方向\n"
+        "- 帮我针对「分布式一致性」这个盲区生成 3 道阶梯式面试题\n"
+        "- 推荐 2 个能用业余时间补齐消息队列短板的开源项目\n"
+        "- 对比一下我在简历中缺少的 Docker/K8s 技能与市场要求的 Gap 有多大\n"
+        "```\n"
     )
 
     user_prompt = (
@@ -345,11 +354,30 @@ def interviewer_agent_node(state: InterviewState) -> InterviewState:
         # 降级：解析失败时用整个输出作为单条题目
         interview_questions = [interview_output]
 
+    # ---- 解析建议追问方向 ----
+    suggested_follow_ups: List[str] = []
+    follow_up_match = re.search(
+        r'##\s*🔮\s*建议追问方向\s*\n((?:\s*-\s*.+\n?)+)',
+        interview_output
+    )
+    if follow_up_match:
+        follow_up_lines = follow_up_match.group(1).strip().split('\n')
+        for line in follow_up_lines:
+            cleaned = re.sub(r'^\s*-\s*', '', line).strip()
+            if cleaned:
+                suggested_follow_ups.append(cleaned)
+
+    # ---- 从 market_report（静态看板）中移除建议追问方向块，保持看板干净 ----
+    clean_report = re.sub(
+        r'\n*##\s*🔮\s*建议追问方向\s*\n(?:\s*-\s*.+\n?)+', '', interview_output
+    ).rstrip()
+
     st.write("✅ **[3/3] Interviewer_Agent** 面试题生成完毕")
 
     return {
         "interview_questions": interview_questions,
-        "market_report": interview_output,  # 复用字段供前端统一静态看板渲染
+        "market_report": clean_report,  # 干净的静态看板（不含追问标签）
+        "suggested_follow_ups": suggested_follow_ups,  # 追问标签单独传递
         "current_step": "interview_generation_completed",
         "is_completed": True,
     }

@@ -33,6 +33,7 @@ import pandas as pd
 from graphs.interview_graph import run_interview_workflow
 from graphs.state import InterviewState, LighthousePlanState
 from graphs.lighthouse_nodes import question_filter_node, assessment_node
+from graphs.nodes import call_deepseek
 from utils.question_bank import get_full_question_bank, get_valid_tendencies
 
 # 用户认证与历史记录
@@ -836,10 +837,12 @@ def render_dashboard():
     )
 
     # ---- 3. 公司来源（st.multiselect，奶油风中文本地化） ----
-    SOURCE_OPTIONS = ["netease", "tencent"]
+    SOURCE_OPTIONS = ["netease", "tencent", "bytedance", "didi"]
     SOURCE_LABELS = {
         "netease": "网易官方",
         "tencent": "腾讯官方",
+        "bytedance": "字节官方",
+        "didi": "滴滴官方",
     }
     selected_sources = st.sidebar.multiselect(
         "公司来源",
@@ -950,7 +953,7 @@ def render_dashboard():
         max_value=30,
         value=15,
         step=1,
-        help="左右拖拽控制每次向网易/腾讯招聘 API 请求的分页深度"
+        help="左右拖拽控制每次向四家大厂招聘 API 请求的分页深度（关键词搜索联动精准定向模式）"
     )
     st.session_state["crawl_pages"] = crawl_pages
 
@@ -1087,6 +1090,42 @@ def render_dashboard():
                 )
                 st.plotly_chart(fig_degree, use_container_width=True)
 
+            # 🔥 热门岗位方向 TOP 5 横向条形图
+            st.markdown("---")
+            if filtered_df is not None and not filtered_df.empty and "title" in filtered_df.columns:
+                top5 = filtered_df["title"].value_counts().head(5)
+                top5 = top5[top5 > 0]  # 零值过滤
+                if not top5.empty:
+                    fig_top5 = go.Figure(data=[go.Bar(
+                        x=top5.values,
+                        y=top5.index,
+                        orientation="h",
+                        text=top5.values,
+                        textposition="outside",
+                        textfont=dict(size=13, color="#FFFFFF"),
+                        marker=dict(
+                            color=top5.values,
+                            colorscale="Oranges",
+                            showscale=False,
+                            line=dict(width=1, color="#2D2722"),
+                        ),
+                        hovertemplate="岗位: %{y}<br>数量: %{x}<extra></extra>",
+                    )])
+                    fig_top5.update_layout(
+                        title=dict(text="🔥 热门岗位方向 TOP 5", font=dict(color="#FFFFFF", size=16)),
+                        font=dict(color="#FFFFFF", family="Arial"),
+                        paper_bgcolor="rgba(45,39,34,1)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        xaxis=dict(showgrid=True, gridcolor="rgba(255,255,255,0.1)",
+                                   tickfont=dict(color="#FFFFFF")),
+                        yaxis=dict(tickfont=dict(color="#FFFFFF")),
+                        showlegend=False,
+                        height=340,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                    )
+                    fig_top5.update_yaxes(autorange="reversed")  # Top1 置顶
+                    st.plotly_chart(fig_top5, use_container_width=True)
+
         with right_col:
             city_top10 = stats["city"].get("top10", {})
             if city_top10:
@@ -1155,6 +1194,57 @@ def render_dashboard():
                 )
                 st.plotly_chart(fig_exp, use_container_width=True)
 
+            # 📊 全量岗位方向分布全景环形图
+            st.markdown("---")
+            if filtered_df is not None and not filtered_df.empty and "title" in filtered_df.columns:
+                def _classify_job(title: str) -> str:
+                    """轻量级岗位方向归类：将原始 title 映射为标准大类。"""
+                    t = str(title).upper()
+                    if any(k in t for k in ['后端', 'JAVA', 'GO', 'DEVELOPER', 'C++', 'RUST', 'PYTHON']):
+                        return '后端开发'
+                    elif any(k in t for k in ['前端', 'FRONTEND', 'WEB', 'H5']):
+                        return '前端开发'
+                    elif any(k in t for k in ['美术', '设计', '游戏', '动画', '角色', '场景',
+                                              '建模', 'UI', 'UX', 'TA']):
+                        return '游戏/美术设计'
+                    elif any(k in t for k in ['算法', 'AI', '模型', '深度学习',
+                                              '机器学习', '数据', 'NLP', 'CV']):
+                        return '算法/智能体'
+                    elif any(k in t for k in ['测试', '运维', 'QA', '安全', 'DEVOP',
+                                              'SRE', 'DEPLOY']):
+                        return '测试/运维/安全'
+                    else:
+                        return '其他/综合岗位'
+
+                df_cat = filtered_df.copy()
+                df_cat["category"] = df_cat["title"].apply(_classify_job)
+                cat_counts = df_cat["category"].value_counts()
+                cat_counts = cat_counts[cat_counts > 0]  # 零值过滤
+                if not cat_counts.empty:
+                    fig_pano = go.Figure(data=[go.Pie(
+                        labels=cat_counts.index.tolist(),
+                        values=cat_counts.values.tolist(),
+                        hole=0.4,
+                        textinfo="label+percent",
+                        textfont=dict(size=12, color="#FFFFFF"),
+                        marker=dict(
+                            colors=["#636efa", "#00cc96", "#ab63fa",
+                                    "#ffa15a", "#19d3f3", "#ff6692"],
+                            line=dict(width=1, color="#2D2722"),
+                        ),
+                        hovertemplate="方向: %{label}<br>岗位数: %{value}<br>占比: %{percent}<extra></extra>",
+                    )])
+                    fig_pano.update_layout(
+                        title=dict(text="📊 全量岗位方向分布全景", font=dict(color="#FFFFFF", size=16)),
+                        font=dict(color="#FFFFFF", family="Arial"),
+                        paper_bgcolor="rgba(45,39,34,1)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                        legend=dict(font=dict(color="#FFFFFF")),
+                        height=380,
+                        margin=dict(l=20, r=20, t=40, b=20),
+                    )
+                    st.plotly_chart(fig_pano, use_container_width=True)
+
         # ========================================================
         # 实时岗位底仓明细表单（宏观图表 → 微观数据闭环）
         # ========================================================
@@ -1183,7 +1273,7 @@ def render_dashboard():
                 )
                 # 公司来源中文本地化
                 if "公司来源" in df_display.columns:
-                    source_map = {"netease": "网易官方", "tencent": "腾讯官方"}
+                    source_map = {"netease": "网易官方", "tencent": "腾讯官方", "bytedance": "字节官方", "didi": "滴滴官方"}
                     df_display["公司来源"] = df_display["公司来源"].map(
                         lambda s: source_map.get(s, s)
                     )
@@ -1211,99 +1301,176 @@ def render_dashboard():
         st.info(
             "📋 **离线数仓控制台**\n\n"
             "数据同步触发已迁移至左侧边栏 **⚙️ 数仓同步配置** 面板。\n\n"
+            "• 在 **关键词搜索** 框输入意向岗位（如 Python、游戏策划）→ **精准定向模式**：先清后爬\n"
+            "• 保持关键词为空 → **全量探索模式**：清空底仓后全量刷新\n"
             "• 拖拽滑块控制每次爬取的页数（1-30 页）\n"
             "• 点击「🔄 开始大批量异步同步数据」一键同步\n\n"
-            "同步过程通过 Upsert 合并入本地离线数仓，已存在岗位自动更新。"
+            "🔄 **动态自清洗机制**：每次爬取前自动清理对应来源的旧数据，确保数仓纯净。"
         )
 
     if pipeline_clicked:
         pages = st.session_state.get("crawl_pages", 15)
+        crawl_keyword = filters.get("keyword", "").strip() if filters else ""
+        is_precision = bool(crawl_keyword)
 
-        with st.spinner(f"正在为您深度抓取双子星厂商前 {pages} 页实时岗位..."):
+        # 动态 spinner 提示
+        if is_precision:
+            spinner_text = f"正在为您精准清洗并同步「{crawl_keyword}」岗位..."
+        else:
+            spinner_text = f"正在为您刷新全量大厂底仓（前 {pages} 页），开拓求职视野..."
+
+        with st.spinner(spinner_text):
             scraper_available = False
             try:
                 from utils.scraper.netease_scraper import NetEaseScraper  # noqa: F811
                 from utils.scraper.tencent_scraper import TencentScraper  # noqa: F811
+                from utils.scraper.bytedance_scraper import ByteDanceScraper  # noqa: F811
+                from utils.scraper.didi_scraper import DidiScraper  # noqa: F811
                 scraper_available = True
             except ImportError:
                 pass
 
-            with st.status("🔄 增量同步进行中...", expanded=True) as status:
+            with st.status("🔄 智能动态清洗与增量同步进行中...", expanded=True) as status:
+                # ---- [1/7] 初始化数仓 ----
                 status.update(
-                    label="[1/6] 初始化数仓表结构...", state="running", expanded=True
+                    label="[1/7] 初始化数仓表结构...", state="running", expanded=True
                 )
                 init_sqlite_db(_DB_PATH)
 
-                raw_jobs: list[dict] = []
-
+                # ---- [2/7] 动态数据清洗（先清后爬） ----
                 if scraper_available:
+                    import sqlite3 as _sqlite3
                     status.update(
-                        label=f"[2/6] 增量采集 | 实时抓取中（NetEase + Tencent，各 {pages} 页）...",
+                        label=f"[2/7] 动态清洗 | 清理旧数据（模式：{'精准' if is_precision else '全量'}）...",
                         state="running",
                         expanded=True,
                     )
                     try:
-                        with NetEaseScraper(max_pages=pages) as netease_scraper:
+                        _conn = _sqlite3.connect(_DB_PATH)
+                        _cur = _conn.cursor()
+                        if is_precision:
+                            # 精准模式：只清除当前关键词相关的旧数据
+                            for _src in ["netease", "tencent", "bytedance", "didi"]:
+                                _cur.execute(
+                                    "DELETE FROM job_positions WHERE source = ? AND title LIKE ?",
+                                    (_src, f"%{crawl_keyword}%"),
+                                )
+                            deleted_count = _cur.rowcount if hasattr(_cur, 'rowcount') else "相关"
+                            st.write(f"🧹 精准清理：已移除「{crawl_keyword}」相关旧记录")
+                        else:
+                            # 全量模式：清空所有数据，全新爬取
+                            _cur.execute("DELETE FROM job_positions")
+                            _cur.execute("SELECT COUNT(*) FROM job_positions")
+                            remaining_before = _cur.fetchone()[0]
+                            st.write(f"🧹 全量重置：数仓底表已清空（全量刷新模式）")
+                        _conn.commit()
+                        _conn.close()
+                    except Exception as _e:
+                        st.warning(f"⚠️ 数据清洗异常（已降级跳过）：{_e}")
+
+                raw_jobs: list[dict] = []
+
+                if scraper_available:
+                    # ---- [3/7] 定向爬取 ----
+                    kw_label = f"「{crawl_keyword}」" if is_precision else "全量"
+                    status.update(
+                        label=f"[3/7] 定向采集 | {kw_label} 实时抓取中（4厂，各 {pages} 页）...",
+                        state="running",
+                        expanded=True,
+                    )
+                    try:
+                        ne_kw = crawl_keyword if is_precision else None
+                        with NetEaseScraper(max_pages=pages, keyword=ne_kw) as netease_scraper:
                             netease_raw = netease_scraper.crawl()
-                            st.write(f"✅ 网易：抓取 {len(netease_raw)} 条")
+                            st.write(f"✅ 网易{kw_label}：抓取 {len(netease_raw)} 条")
                             raw_jobs.extend(netease_raw)
                     except Exception as e:
                         st.warning(f"⚠️ 网易爬虫异常：{e}")
 
                     try:
-                        tencent_scraper = TencentScraper(max_pages=pages)
+                        tc_kw = crawl_keyword if is_precision else None
+                        tencent_scraper = TencentScraper(max_pages=pages, keyword=tc_kw)
                         tencent_raw = tencent_scraper.crawl()
-                        st.write(f"✅ 腾讯：抓取 {len(tencent_raw)} 条")
+                        st.write(f"✅ 腾讯{kw_label}：抓取 {len(tencent_raw)} 条")
                         raw_jobs.extend(tencent_raw)
                     except Exception as e:
                         st.warning(f"⚠️ 腾讯爬虫异常：{e}")
 
+                    try:
+                        bd_kw = crawl_keyword if is_precision else None
+                        bd_scraper = ByteDanceScraper(max_pages=pages, keyword=bd_kw)
+                        bd_raw = bd_scraper.crawl()
+                        st.write(f"✅ 字节{kw_label}：抓取 {len(bd_raw)} 条")
+                        raw_jobs.extend(bd_raw)
+                    except Exception as e:
+                        st.warning(f"⚠️ 字节爬虫异常：{e}")
 
-                status.update(
-                    label="[3/6] 增量同步 | 多源数据转换（Transformer）...",
-                    state="running",
-                    expanded=True,
-                )
-                transformed_jobs: list[dict] = []
-                if scraper_available:
+                    try:
+                        dd_kw = crawl_keyword if is_precision else None
+                        dd_scraper = DidiScraper(max_pages=pages, keyword=dd_kw)
+                        dd_raw = dd_scraper.crawl()
+                        st.write(f"✅ 滴滴{kw_label}：抓取 {len(dd_raw)} 条")
+                        raw_jobs.extend(dd_raw)
+                    except Exception as e:
+                        st.warning(f"⚠️ 滴滴爬虫异常：{e}")
+
+                    # ---- [4/7] 数据转换 ----
+                    status.update(
+                        label="[4/7] 增量同步 | 多源数据转换（Transformer）...",
+                        state="running",
+                        expanded=True,
+                    )
+                    transformed_jobs: list[dict] = []
                     netease_raw = [j for j in raw_jobs if j.get("source") == "netease"]
                     tencent_raw = [j for j in raw_jobs if j.get("source") == "tencent"]
-                    other_raw = [j for j in raw_jobs
-                                 if j not in netease_raw and j not in tencent_raw]
+                    bytedance_raw = [j for j in raw_jobs if j.get("source") == "bytedance"]
+                    didi_raw = [j for j in raw_jobs if j.get("source") == "didi"]
+                    other_raw = [j for j in raw_jobs if j not in netease_raw and j not in tencent_raw
+                                 and j not in bytedance_raw and j not in didi_raw]
                     if netease_raw:
                         transformed_jobs.extend(transform_jobs(netease_raw, source="netease"))
                     if tencent_raw:
                         transformed_jobs.extend(transform_jobs(tencent_raw, source="tencent"))
+                    if bytedance_raw:
+                        transformed_jobs.extend(transform_jobs(bytedance_raw, source="bytedance"))
+                    if didi_raw:
+                        transformed_jobs.extend(transform_jobs(didi_raw, source="didi"))
                     if other_raw:
                         transformed_jobs.extend(other_raw)
+                    st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
+
+                    # ---- [5/7] 清洗 ----
+                    status.update(
+                        label="[5/7] 增量同步 | 正则清洗与标准化（Cleaner）...",
+                        state="running",
+                        expanded=True,
+                    )
+                    df_cleaned = clean_job_data(pd.DataFrame(transformed_jobs))
+                    st.write(f"✅ 清洗完成：{len(df_cleaned)} 条有效记录")
+
+                    # ---- [6/7] 入库 ----
+                    status.update(
+                        label="[6/7] 增量同步 | 写入离线数仓（Upsert）...",
+                        state="running",
+                        expanded=True,
+                    )
+                    n_written = save_to_sqlite(df_cleaned, _DB_PATH)
+                    st.write(f"✅ 数仓写入：{n_written} 条已持久化")
+
+                    # ---- [7/7] 完成 ----
+                    status.update(
+                        label="[7/7] 智能动态同步完成 ✅",
+                        state="complete",
+                        expanded=False,
+                    )
                 else:
-                    transformed_jobs = raw_jobs
-                st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
-
-                status.update(
-                    label="[4/6] 增量同步 | 正则清洗与标准化（Cleaner）...",
-                    state="running",
-                    expanded=True,
-                )
-                df_cleaned = clean_job_data(pd.DataFrame(transformed_jobs))
-                st.write(f"✅ 清洗完成：{len(df_cleaned)} 条有效记录")
-
-                status.update(
-                    label="[5/6] 增量同步 | 写入离线数仓（Upsert）...",
-                    state="running",
-                    expanded=True,
-                )
-                n_written = save_to_sqlite(df_cleaned, _DB_PATH)
-                st.write(f"✅ 数仓写入：{n_written} 条已持久化")
-
-                status.update(
-                    label="[6/6] 增量同步完成 ✅",
-                    state="complete",
-                    expanded=False,
-                )
+                    st.error("❌ 爬虫模块未就绪，无法执行同步")
 
         st.cache_data.clear()
-        st.toast(f"✨ 成功控流抓取 {pages} 页数据，数仓底仓已灌满！", icon="🎉")
+        if is_precision:
+            st.toast(f"✨ 精准定向同步完成 | 关键词「{crawl_keyword}」| {n_written if scraper_available else 0} 条", icon="🎯")
+        else:
+            st.toast(f"✨ 全量刷新完成 | {pages} 页 x 4 厂 = 底仓已灌满！", icon="🎉")
         st.rerun()
 
 
@@ -1343,6 +1510,10 @@ def render_lighthouse():
         st.session_state.lighthouse_history_view = False
     if "lighthouse_record_detail" not in st.session_state:
         st.session_state.lighthouse_record_detail = None
+    if "lighthouse_chat_history" not in st.session_state:
+        st.session_state.lighthouse_chat_history = []  # [{"role": "user/assistant", "content": "..."}]
+    if "lighthouse_active_prompt" not in st.session_state:
+        st.session_state.lighthouse_active_prompt = ""  # 用户点击标签或输入追问的暂存文本
 
     # ---- 历史记录查看模式 ----
     if st.session_state.get("lighthouse_history_view"):
@@ -1393,6 +1564,8 @@ def render_lighthouse():
                 st.session_state.lighthouse_target_position = ""
                 st.session_state.lighthouse_grade = ""
                 st.session_state["lighthouse_saved"] = False
+                st.session_state.lighthouse_chat_history = []
+                st.session_state.lighthouse_active_prompt = ""
                 st.rerun()
         return
 
@@ -1550,6 +1723,7 @@ def render_lighthouse():
 
                     status.update(label="✅ 评估完成", state="complete")
 
+                assess_result["user_answers"] = user_answers
                 st.session_state.lighthouse_results = assess_result
                 st.session_state["lighthouse_saved"] = False
                 st.rerun()
@@ -1628,6 +1802,77 @@ def _render_lighthouse_record_detail(record_id: str):
 
 
 # ============================================================
+# 辅助函数：多维上下文打包（灯塔计划追问沙盒专用）
+# ============================================================
+def _prepare_lighthouse_chat_context(results: dict) -> str:
+    """
+    将用户画像、技术倾向、市场数据拼接为高密度 System Prompt 补充上下文。
+
+    数据源：
+    1. 用户基本信息（target_position, grade）
+    2. 第一轮技术倾向分值（tech_tendency）
+    3. 市场数据特征注入（类似 RAG，调用 _load_market_stats_for_interview）
+    """
+    target_position = results.get("target_position", "未知岗位")
+    grade = results.get("grade", "未知年级")
+    tech_tendency = results.get("tech_tendency", {})
+    user_answers = results.get("user_answers", [])
+    roadmap_json = results.get("roadmap_json", {})
+
+    parts = [
+        "# 用户多维画像上下文",
+        f"## 基本信息\n- 目标岗位：{target_position}\n- 当前年级：{grade}",
+    ]
+
+    # -- 技术倾向分值 --
+    if tech_tendency and isinstance(tech_tendency, dict):
+        parts.append("## 技术倾向评估（第一轮测评结果）")
+        for direction, score in sorted(tech_tendency.items(), key=lambda x: x[1], reverse=True):
+            bar = "█" * int(score / 10) + "░" * (10 - int(score / 10))
+            parts.append(f"- {direction}：{score}/100 {bar}")
+
+    # -- 答题摘要 --
+    if user_answers:
+        parts.append("## 用户答题偏好摘要")
+        for ans in user_answers[:3]:  # 只取前 3 题作为特征
+            parts.append(f"- 倾向「{ans.get('tendency', '?')}」：{ans.get('option_text', '')[:60]}...")
+
+    # -- 路线图阶段概要 --
+    if roadmap_json and isinstance(roadmap_json, dict):
+        stages = roadmap_json.get("stages", [])
+        if stages:
+            parts.append("## 已生成的路线图阶段")
+            for s in stages:
+                parts.append(f"- {s.get('name', '?')}（{s.get('duration', '?')}）：{'、'.join(s.get('milestones', [])[:2])}")
+
+    # -- 市场数据注入（RAG-like） --
+    try:
+        market_stats = _load_market_stats_for_interview(target_position)
+        if market_stats:
+            parts.append("## 市场实时数据（来自离线数仓）")
+            meta = market_stats.get("meta", {})
+            parts.append(f"- 该岗位库内总量：{meta.get('total_count', 0)} 条")
+            salary = market_stats.get("salary", {})
+            if salary.get("avg_min") and salary.get("avg_max"):
+                parts.append(f"- 市场薪资范围：{salary['avg_min']:.0f}K - {salary['avg_max']:.0f}K/月")
+            city_top = market_stats.get("city", {}).get("top10", {})
+            if city_top:
+                top3 = list(city_top.items())[:3]
+                parts.append(f"- 需求 Top3 城市：{', '.join(f'{c}({n})' for c, n in top3)}")
+            degree_dist = market_stats.get("degree", {}).get("distribution", {})
+            if degree_dist:
+                degree_parts = []
+                for dk, dv in list(degree_dist.items())[:4]:
+                    cnt = dv.get("count", 0) if isinstance(dv, dict) else 0
+                    degree_parts.append(f"{dk}({cnt}个)")
+                parts.append(f"- 学历门槛分布：{', '.join(degree_parts)}")
+    except Exception:
+        parts.append("## 市场实时数据\n（当前不可用，请基于已有信息回答）")
+
+    return "\n\n".join(parts)
+
+
+# ============================================================
 # 辅助函数：渲染灯塔计划结果看板
 # ============================================================
 def _render_lighthouse_result(
@@ -1635,7 +1880,11 @@ def _render_lighthouse_result(
     target_position: str,
     grade: str,
 ):
-    """渲染阶段二结果看板：雷达图 + Markdown 路线图（含降级错误页）"""
+    """渲染阶段二结果看板：雷达图 + Markdown 路线图 + 深挖追问气泡沙盒（含降级错误页）"""
+
+    # 注入 target_position 和 grade 到 results，供 chat context 使用
+    results.setdefault("target_position", target_position)
+    results.setdefault("grade", grade)
 
     execution_error = results.get("execution_error")
     tech_tendency = results.get("tech_tendency")
@@ -1669,6 +1918,109 @@ def _render_lighthouse_result(
     # ---- 静态 Markdown 路线图 ----
     if roadmap:
         st.markdown(roadmap)
+
+    # ============================================================
+    # 🔮 深挖追问气泡沙盒（仅在正常结果下展示）
+    # ============================================================
+    if execution_error:
+        return  # 有 execution_error 时不展示追问沙盒
+
+    st.markdown("---")
+    st.subheader("🔮 对路线图有疑问？继续深挖")
+
+    roadmap_json = results.get("roadmap_json", {})
+    suggested_follow_ups = []
+    if isinstance(roadmap_json, dict):
+        suggested_follow_ups = roadmap_json.get("suggested_follow_ups", [])
+
+    # ---- 步骤 A：智能深化标签（胶囊按钮） ----
+    if suggested_follow_ups:
+        cols = st.columns(len(suggested_follow_ups))
+        for i, tag_text in enumerate(suggested_follow_ups):
+            with cols[i]:
+                if st.button(
+                    tag_text,
+                    key=f"lighthouse_tag_{i}_{hash(tag_text) % 10000}",
+                    use_container_width=True,
+                ):
+                    st.session_state.lighthouse_active_prompt = tag_text
+                    st.rerun()
+
+    # ---- 步骤 B：历史气泡渲染 ----
+    if st.session_state.lighthouse_chat_history:
+        for msg in st.session_state.lighthouse_chat_history:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+    # ---- 步骤 C：自由追问框 ----
+    user_input = st.chat_input("对当前路线图有何疑问？继续追问 AI 规划师...")
+    if user_input:
+        st.session_state.lighthouse_active_prompt = user_input
+        st.rerun()
+
+    # ---- 步骤 D：同步执行器（仅当 active_prompt 非空时触发 LLM） ----
+    if st.session_state.lighthouse_active_prompt:
+        prompt_text = st.session_state.lighthouse_active_prompt
+        # 🔴 立即清空标志位，防止 re-run 死循环
+        st.session_state.lighthouse_active_prompt = ""
+
+        # 追加用户消息到聊天历史
+        st.session_state.lighthouse_chat_history.append({
+            "role": "user",
+            "content": prompt_text,
+        })
+
+        # 组装多维上下文
+        context = _prepare_lighthouse_chat_context(results)
+
+        # 同步调用 LLM
+        with st.status("🔮 AI 规划师正在深度思考...", expanded=True) as status:
+            system_prompt = (
+                "你是一位资深的技术职业规划专家，正在与用户进行一对一的深度规划对话。\n\n"
+                "背景：用户已经完成了一轮技术倾向测评，你已掌握用户的完整画像、"
+                "技术倾向分值、学习路线图以及市场实时数据。\n\n"
+                "对话规则：\n"
+                "1. 回答必须基于上下文中的实际数据，而非泛泛而谈\n"
+                "2. 如果用户问面试题，给出 3-5 道针对性题目（含简短解析）\n"
+                "3. 如果用户问资源推荐，给出具体的书名/课程名/项目名+推荐理由\n"
+                "4. 如果用户问方向对比，用表格呈现关键 trade-off\n"
+                "5. 保持温暖鼓励的语调，但内容要有干货\n"
+                "6. 每次回答控制在 200-500 字，结构清晰"
+            )
+
+            # 拼接历史对话
+            history_text = ""
+            history_len = len(st.session_state.lighthouse_chat_history)
+            recent_history = st.session_state.lighthouse_chat_history[
+                max(0, history_len - 6):  # 只取最近 3 轮（6 条消息）
+            ]
+            for h in recent_history:
+                role_label = "用户" if h["role"] == "user" else "AI 规划师"
+                history_text += f"### {role_label}\n{h['content']}\n\n"
+
+            user_prompt = (
+                f"{context}\n\n"
+                f"---\n\n"
+                f"## 对话历史\n{history_text}"
+                f"---\n\n"
+                f"## 用户最新追问\n{prompt_text}\n\n"
+                f"请基于以上多维上下文，对用户的追问给出高质量回答。"
+            )
+
+            try:
+                response = call_deepseek(system_prompt, user_prompt)
+            except Exception as e:
+                response = f"⚠️ 抱歉，AI 规划师暂时无法响应（{str(e)}），请稍后重试。"
+
+            # 追加 AI 回答到聊天历史
+            st.session_state.lighthouse_chat_history.append({
+                "role": "assistant",
+                "content": response,
+            })
+
+            status.update(label="✅ 回答完成", state="complete")
+
+        st.rerun()
 
 
 def _render_radar_chart(
@@ -1799,6 +2151,25 @@ def render_interview():
         help="输入您想要申请的公司",
     )
 
+    # ---- 初始化 session_state（防跨页面切换报错） ----
+    if "interview_results" not in st.session_state:
+        st.session_state.interview_results = None
+    if "interview_chat_history" not in st.session_state:
+        st.session_state.interview_chat_history = []
+    if "interview_active_prompt" not in st.session_state:
+        st.session_state.interview_active_prompt = ""
+
+    # ============================================================
+    # 展示已有结果 + 追问沙盒
+    # ============================================================
+    if st.session_state.interview_results is not None:
+        result = st.session_state.interview_results
+        _render_interview_result_with_chat(
+            result=result,
+            user=user,
+        )
+        return
+
     # ---- 开始分析按钮 ----
     if st.button("🚀 开始面试模拟", type="primary", use_container_width=True):
         if not target_position:
@@ -1847,35 +2218,16 @@ def render_interview():
             result = run_interview_workflow(initial_state)
             status.update(label="✅ 分析完成", state="complete")
 
-        # =====================================================
-        # Step 4: 静态 Markdown 看板渲染
-        # =====================================================
-        st.markdown("---")
+        # ---- 注入上下文信息到结果 ----
+        result["target_position"] = target_position
+        result["target_company"] = target_company or None
+        result["user_resume"] = user_resume
+        result["market_summary"] = market_summary
 
-        # 市场趋势报告
-        market_report = result.get("market_report")
-        if market_report:
-            st.markdown(market_report)
-            st.markdown("---")
-
-        # 技能差距诊断
-        gap_analysis = result.get("gap_analysis")
-        if gap_analysis:
-            st.markdown(gap_analysis)
-            st.markdown("---")
-
-        # 面试题（核心交付物，直展不折叠）
-        questions = result.get("interview_questions")
-        if questions:
-            st.subheader("🎯 定制化面试变形题")
-            for i, q in enumerate(questions, 1):
-                st.markdown(
-                    f"> **题目 {i}**\n>\n> {q}\n"
-                )
-            st.markdown(
-                "> 💡 **提示**：针对以上题目进行模拟练习，"
-                "重点关注差距诊断报告中标记为 🟠 或 🔴 的维度。"
-            )
+        # ---- 存入 session_state，触发 re-run 进入展示模式 ----
+        st.session_state.interview_results = result
+        st.session_state.interview_chat_history = []
+        st.session_state.interview_active_prompt = ""
 
         # =====================================================
         # Step 5: 保存历史记录
@@ -1887,14 +2239,222 @@ def render_interview():
                     target_position=target_position,
                     target_company=target_company or None,
                     user_resume=user_resume,
-                    market_report=market_report,
-                    gap_analysis=gap_analysis,
-                    interview_questions=questions,
+                    market_report=result.get("market_report"),
+                    gap_analysis=result.get("gap_analysis"),
+                    interview_questions=result.get("interview_questions"),
                     db_path=_DB_PATH,
                 )
                 st.toast("✅ 面试分析已保存到历史记录", icon="💾")
             except Exception as e:
                 st.warning(f"⚠️ 保存历史记录失败: {e}")
+
+        st.rerun()
+
+
+# ============================================================
+# 辅助函数：面试模拟多维上下文打包
+# ============================================================
+def _prepare_interview_chat_context(result: dict) -> str:
+    """
+    将面试模拟全链路数据拼接为追问沙盒的 System Prompt 补充上下文。
+
+    数据源：
+    1. 用户基本信息（target_position, target_company, user_resume）
+    2. 市场分析报告摘要（market_report 关键指标）
+    3. 技能差距诊断（gap_analysis 核心结论）
+    4. 实时市场数据（_load_market_stats_for_interview 数仓注入）
+    """
+    target_position = result.get("target_position", "未知岗位")
+    target_company = result.get("target_company")
+    user_resume = result.get("user_resume", "")
+    market_report = result.get("market_report", "")
+    gap_analysis = result.get("gap_analysis", "")
+
+    parts = [
+        "# 用户多维画像上下文（面试追问沙盒专用）",
+        f"## 基本信息\n- 目标岗位：{target_position}",
+    ]
+    if target_company:
+        parts.append(f"- 目标公司：{target_company}")
+
+    # -- 简历摘要 --
+    if user_resume:
+        parts.append(f"## 候选人简历\n{user_resume[:800]}...")
+
+    # -- 市场分析摘要 --
+    if market_report:
+        parts.append(f"## 市场分析报告\n{market_report[:500]}...")
+
+    # -- 差距诊断摘要 --
+    if gap_analysis:
+        parts.append(f"## 技能差距诊断\n{gap_analysis[:500]}...")
+
+    # -- 市场实时数据注入 --
+    try:
+        market_stats = _load_market_stats_for_interview(target_position)
+        if market_stats:
+            parts.append("## 市场实时数据（来自离线数仓）")
+            meta = market_stats.get("meta", {})
+            parts.append(f"- 该岗位库内总量：{meta.get('total_count', 0)} 条")
+            salary = market_stats.get("salary", {})
+            if salary.get("avg_min") and salary.get("avg_max"):
+                parts.append(f"- 市场薪资范围：{salary['avg_min']:.0f}K - {salary['avg_max']:.0f}K/月")
+    except Exception:
+        pass
+
+    return "\n\n".join(parts)
+
+
+# ============================================================
+# 辅助函数：渲染面试结果 + 追问气泡沙盒
+# ============================================================
+def _render_interview_result_with_chat(result: dict, user: dict | None):
+    """渲染面试模拟结果看板 + 深挖追问气泡沙盒"""
+
+    market_report = result.get("market_report")
+    gap_analysis = result.get("gap_analysis")
+    questions = result.get("interview_questions")
+    suggested_follow_ups = result.get("suggested_follow_ups", [])
+    target_position = result.get("target_position", "未知岗位")
+
+    # ---- 静态 Markdown 看板 ----
+    st.markdown("---")
+
+    if market_report:
+        st.markdown(market_report)
+        st.markdown("---")
+
+    if gap_analysis:
+        st.markdown(gap_analysis)
+        st.markdown("---")
+
+    if questions:
+        st.subheader("🎯 定制化面试变形题")
+        for i, q in enumerate(questions, 1):
+            st.markdown(f"> **题目 {i}**\n>\n> {q}\n")
+        st.markdown(
+            "> 💡 **提示**：针对以上题目进行模拟练习，"
+            "重点关注差距诊断报告中标记为 🟠 或 🔴 的维度。"
+        )
+
+    # ============================================================
+    # 🔮 深挖追问气泡沙盒
+    # ============================================================
+    st.markdown("---")
+    st.subheader("🔮 对分析结果有疑问？继续深挖")
+
+    # ---- 智能深化标签（胶囊按钮） ----
+    # 兜底：若 LLM 未输出标签或标签为空，基于差距诊断自动生成
+    if not suggested_follow_ups:
+        default_tags = []
+        if gap_analysis:
+            if "分布式" in gap_analysis or "高并发" in gap_analysis:
+                default_tags.append("针对我的系统设计盲区生成 3 道面试题")
+            if "算法" in gap_analysis or "数据结构" in gap_analysis:
+                default_tags.append("用一道真实的算法面试题考我并给出解析")
+            if "数据库" in gap_analysis or "SQL" in gap_analysis:
+                default_tags.append("对比 MySQL 和 PostgreSQL 在面试中的高频考点")
+        if not default_tags:
+            default_tags = [
+                f"针对我的最大技能盲区生成 3 道阶梯式面试题",
+                f"结合{target_position or '目标岗位'}市场数据，分析我的竞争力",
+                "推荐 2 本最适合我当前水平的进阶书籍",
+            ]
+        suggested_follow_ups = default_tags
+
+    cols = st.columns(len(suggested_follow_ups))
+    for i, tag_text in enumerate(suggested_follow_ups):
+        with cols[i]:
+            if st.button(
+                tag_text,
+                key=f"interview_tag_{i}_{hash(tag_text) % 10000}",
+                use_container_width=True,
+            ):
+                st.session_state.interview_active_prompt = tag_text
+                st.rerun()
+
+    # ---- 历史气泡渲染 ----
+    if st.session_state.interview_chat_history:
+        for msg in st.session_state.interview_chat_history:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+    # ---- 自由追问框 ----
+    user_input = st.chat_input("对分析结果有疑问？继续追问 AI 面试官...")
+    if user_input:
+        st.session_state.interview_active_prompt = user_input
+        st.rerun()
+
+    # ---- 同步执行器 ----
+    if st.session_state.interview_active_prompt:
+        prompt_text = st.session_state.interview_active_prompt
+        # 🔴 立即清空标志位，防止 re-run 死循环
+        st.session_state.interview_active_prompt = ""
+
+        # 追加用户消息
+        st.session_state.interview_chat_history.append({
+            "role": "user",
+            "content": prompt_text,
+        })
+
+        # 组装上下文
+        context = _prepare_interview_chat_context(result)
+
+        with st.status("🤖 AI 面试官正在深度思考...", expanded=True) as status:
+            system_prompt = (
+                "你是一位资深的大厂面试官和技术评审专家，正在与候选人进行一对一的深度面试辅导对话。\n\n"
+                "背景：候选人已完成全链路面试模拟（市场分析 → 差距诊断 → 定制面试题），"
+                "你已掌握候选人的完整简历、技能差距报告、面试题列表以及市场实时数据。\n\n"
+                "对话规则：\n"
+                "1. 回答必须基于上下文中的实际数据，精准针对候选人的技能盲区\n"
+                "2. 如果用户问面试题解析，给出参考答案要点和评分标准\n"
+                "3. 如果用户问技能提升路径，给出具体的项目/课程/书籍推荐\n"
+                "4. 如果用户问市场竞争力，基于数仓数据给出量化对比\n"
+                "5. 保持专业但鼓励的语调，用具体数据支撑建议\n"
+                "6. 每次回答控制在 200-500 字，结构清晰"
+            )
+
+            history_text = ""
+            history_len = len(st.session_state.interview_chat_history)
+            recent_history = st.session_state.interview_chat_history[
+                max(0, history_len - 6):
+            ]
+            for h in recent_history:
+                role_label = "候选人" if h["role"] == "user" else "AI 面试官"
+                history_text += f"### {role_label}\n{h['content']}\n\n"
+
+            user_prompt = (
+                f"{context}\n\n"
+                f"---\n\n"
+                f"## 对话历史\n{history_text}"
+                f"---\n\n"
+                f"## 候选人最新追问\n{prompt_text}\n\n"
+                f"请基于以上多维上下文，给出高质量回答。"
+            )
+
+            try:
+                response = call_deepseek(system_prompt, user_prompt)
+            except Exception as e:
+                response = f"⚠️ 抱歉，AI 面试官暂时无法响应（{str(e)}），请稍后重试。"
+
+            st.session_state.interview_chat_history.append({
+                "role": "assistant",
+                "content": response,
+            })
+
+            status.update(label="✅ 回答完成", state="complete")
+
+        st.rerun()
+
+    # ---- 重新分析按钮 ----
+    st.markdown("---")
+    col_reset, _ = st.columns([1, 4])
+    with col_reset:
+        if st.button("🔄 重新分析", type="secondary", use_container_width=True):
+            st.session_state.interview_results = None
+            st.session_state.interview_chat_history = []
+            st.session_state.interview_active_prompt = ""
+            st.rerun()
 
 
 # ============================================================
@@ -1975,6 +2535,97 @@ def _render_interview_record_detail(record_id: str):
             "> 💡 **提示**：针对以上题目进行模拟练习，"
             "重点关注差距诊断报告中标记为 🟠 或 🔴 的维度。"
         )
+
+    # ============================================================
+    # 🔮 深挖追问气泡沙盒（历史记录也支持）
+    # ============================================================
+    # 初始化独立的聊天状态（与实时面试的 session_state 隔离）
+    hist_key = f"interview_hist_chat_{record_id}"
+    hist_prompt_key = f"interview_hist_prompt_{record_id}"
+    if hist_key not in st.session_state:
+        st.session_state[hist_key] = []
+    if hist_prompt_key not in st.session_state:
+        st.session_state[hist_prompt_key] = ""
+
+    st.markdown("---")
+    st.subheader("🔮 对历史分析有疑问？继续深挖")
+
+    # 兜底追问标签
+    hist_tags = [
+        f"针对这份分析的技能盲区生成 3 道面试题",
+        f"结合{record['target_position']}当前市场数据，分析我的竞争力",
+        "推荐 2 本最适合我当前水平的进阶书籍",
+    ]
+    tag_cols = st.columns(len(hist_tags))
+    for i, tag_text in enumerate(hist_tags):
+        with tag_cols[i]:
+            if st.button(
+                tag_text,
+                key=f"hist_tag_{record_id}_{i}",
+                use_container_width=True,
+            ):
+                st.session_state[hist_prompt_key] = tag_text
+                st.rerun()
+
+    # 气泡渲染
+    if st.session_state[hist_key]:
+        for msg in st.session_state[hist_key]:
+            with st.chat_message(msg["role"]):
+                st.write(msg["content"])
+
+    # 追问框
+    user_input = st.chat_input(
+        "对这份历史分析有疑问？继续追问 AI 面试官...",
+        key=f"hist_chat_input_{record_id}",
+    )
+    if user_input:
+        st.session_state[hist_prompt_key] = user_input
+        st.rerun()
+
+    # 同步执行器
+    if st.session_state[hist_prompt_key]:
+        prompt_text = st.session_state[hist_prompt_key]
+        st.session_state[hist_prompt_key] = ""  # 立即清空防死循环
+
+        st.session_state[hist_key].append({"role": "user", "content": prompt_text})
+
+        # 组装上下文
+        context = _prepare_interview_chat_context({
+            "target_position": record["target_position"],
+            "target_company": record.get("target_company"),
+            "user_resume": record.get("user_resume", ""),
+            "market_report": record.get("market_report", ""),
+            "gap_analysis": record.get("gap_analysis", ""),
+        })
+
+        with st.status("🤖 AI 面试官正在深度思考...", expanded=True) as status:
+            system_prompt = (
+                "你是一位资深的大厂面试官，正在回顾一份历史面试分析并与候选人进行一对一辅导对话。\n\n"
+                "对话规则：\n"
+                "1. 回答必须基于上下文中的实际数据\n"
+                "2. 每次回答控制在 200-500 字，结构清晰\n"
+                "3. 保持专业但鼓励的语调"
+            )
+            history_text = ""
+            for h in st.session_state[hist_key][max(0, len(st.session_state[hist_key]) - 6):]:
+                role_label = "候选人" if h["role"] == "user" else "AI 面试官"
+                history_text += f"### {role_label}\n{h['content']}\n\n"
+
+            user_prompt = (
+                f"{context}\n\n---\n\n"
+                f"## 对话历史\n{history_text}---\n\n"
+                f"## 候选人最新追问\n{prompt_text}"
+            )
+
+            try:
+                response = call_deepseek(system_prompt, user_prompt)
+            except Exception as e:
+                response = f"⚠️ 抱歉，AI 面试官暂时无法响应（{str(e)}），请稍后重试。"
+
+            st.session_state[hist_key].append({"role": "assistant", "content": response})
+            status.update(label="✅ 回答完成", state="complete")
+
+        st.rerun()
 
     if st.button("⬅️ 返回列表", key="interview_detail_back"):
         st.session_state["interview_record_detail"] = None

@@ -252,6 +252,17 @@ def assessment_node(state: LighthousePlanState) -> Dict[str, Any]:
         '- "stages": 阶段列表，每个阶段含 name（如"入门"、"进阶"、"实战"、"专精"）、duration（预计时间）、'
         'milestones（里程碑列表）、resources（推荐资源列表，每项含 title、type、url 或 description）\n'
         '- "summary": 100-200 字综合评语，总结用户的技术画像和学习建议\n\n'
+        "## 任务三：预设深挖追问标签\n"
+        "根据技术倾向分析结果，智能预设 3 个针对性的深挖追问标签，存放在 `roadmap_json` 的 "
+        '`"suggested_follow_ups"` 键中（List[str]）。\n'
+        "设计原则：\n"
+        "1. 每个标签必须是用户读完路线图后很可能想追问的具体问题或指令\n"
+        "2. 针对该用户最高分的 1-2 个技术方向做深度展开\n"
+        "3. 标签文字需口语化、有行动感，而非学术标题\n"
+        "示例（后端倾向高的用户）：\n"
+        '- "帮我列出达成阶段二里程碑的高频面试题"\n'
+        '- "对比一下 Spring Cloud 和 Kubernetes 在微服务治理上的 trade-off"\n'
+        '- "推荐 3 个适合我当前水平的开源项目练手"\n\n'
         "## 输出格式要求\n"
         "你必须输出一个完整的 JSON 对象，包裹在 ```json 代码块中。JSON 结构如下：\n"
         "```json\n"
@@ -269,7 +280,8 @@ def assessment_node(state: LighthousePlanState) -> Dict[str, Any]:
         '      {"name": "...", "duration": "...", "milestones": ["...", "..."], '
         '"resources": [{"title": "...", "type": "课程/书籍/项目/文档", "url": "..."}]}\n'
         "    ],\n"
-        '    "summary": "...综合评语..."\n'
+        '    "summary": "...综合评语...",\n'
+        '    "suggested_follow_ups": ["追问标签1", "追问标签2", "追问标签3"]\n'
         "  }\n"
         "}\n"
         "```\n"

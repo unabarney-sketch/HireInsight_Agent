@@ -26,6 +26,7 @@ class InterviewState(TypedDict, total=False):
     market_report: Optional[str]              # Market_Agent 输出：市场趋势报告
     gap_analysis: Optional[str]               # Critic_Agent 输出：技能差距诊断
     interview_questions: Optional[List[str]]   # Interviewer_Agent 输出：面试题列表
+    suggested_follow_ups: Optional[List[str]]  # Interviewer_Agent 输出：预设追问标签
     
     # === RAG 上下文 ===
     rag_context: Optional[List[str]]          # RAG 检索结果

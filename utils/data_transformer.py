@@ -83,6 +83,68 @@ def _empty_record(source: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 滴滴 → 标准映射
+# ---------------------------------------------------------------------------
+
+def _transform_didi(raw: dict[str, Any]) -> dict[str, Any]:
+    """滴滴出行 → 标准中间格式。"""
+    record = _empty_record(source="didi")
+    record["original_id"] = str(raw.get("id") or raw.get("jdId", "")).strip()
+    record["title_raw"] = str(raw.get("jobName", "")).strip()
+    record["company"] = "滴滴"
+    record["department"] = str(raw.get("deptName", "")).strip()
+    record["category"] = str(raw.get("jobType", "")).strip()
+    record["sub_category"] = str(raw.get("labelName", "")).strip()
+    record["city_raw"] = str(raw.get("workArea", "")).strip()
+    record["district"] = ""
+    record["salary_raw"] = ""
+    record["experience_raw"] = ""
+    record["degree_raw"] = ""
+    record["work_type"] = "全职"
+    record["duty"] = ""
+    record["requirement"] = ""
+    record["skills"] = ""
+    jd_id = record["original_id"]
+    record["post_url"] = f"https://talent.didiglobal.com/social/job/{jd_id}" if jd_id else ""
+    record["published_at"] = str(raw.get("createTime", ""))[:10] if raw.get("createTime") else ""
+    record["updated_at"] = record["published_at"]
+    return record
+
+
+# ---------------------------------------------------------------------------
+# 字节跳动 → 标准映射
+# ---------------------------------------------------------------------------
+
+def _transform_bytedance(raw: dict[str, Any]) -> dict[str, Any]:
+    """字节跳动 → 标准中间格式。"""
+    record = _empty_record(source="bytedance")
+    record["original_id"] = str(raw.get("id", "")).strip()
+    record["title_raw"] = str(raw.get("title", "")).strip()
+    record["company"] = "字节跳动"
+    record["department"] = str(raw.get("job_category", {}).get("name", "") if isinstance(raw.get("job_category"), dict) else raw.get("job_category", ""))
+    record["category"] = str(raw.get("job_subject", {}).get("name", "") if isinstance(raw.get("job_subject"), dict) else raw.get("job_subject", ""))
+    record["sub_category"] = str(raw.get("recruit_type", {}).get("name", "") if isinstance(raw.get("recruit_type"), dict) else "")
+    city = raw.get("city_info", {})
+    if isinstance(city, dict):
+        record["city_raw"] = city.get("name", "")
+    else:
+        record["city_raw"] = str(city or "")
+    record["district"] = ""
+    record["salary_raw"] = ""
+    record["experience_raw"] = ""
+    record["degree_raw"] = ""
+    record["work_type"] = "全职"
+    record["duty"] = str(raw.get("description", ""))[:2000] if raw.get("description") else ""
+    record["requirement"] = str(raw.get("requirement", ""))[:2000] if raw.get("requirement") else ""
+    record["skills"] = ""
+    jid = record["original_id"]
+    record["post_url"] = f"https://jobs.bytedance.com/experienced/position/{jid}/detail" if jid else ""
+    record["published_at"] = str(raw.get("publish_time", ""))[:10] if raw.get("publish_time") else ""
+    record["updated_at"] = record["published_at"]
+    return record
+
+
+# ---------------------------------------------------------------------------
 # 腾讯 → 标准映射
 # ---------------------------------------------------------------------------
 
@@ -498,6 +560,8 @@ def _transform_netease(raw: dict[str, Any]) -> dict[str, Any]:
 _TRANSFORMERS: dict[str, Any] = {
     "netease": _transform_netease,
     "tencent": _transform_tencent,
+    "bytedance": _transform_bytedance,
+    "didi": _transform_didi,
     "lilith": _transform_lilith,   # [已废弃]
     "mihoyo": _transform_mihoyo,   # [已废弃]
 }
