@@ -14,7 +14,7 @@ import os
 import sys
 import base64
 import streamlit as st
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 import plotly.graph_objects as go
 from utils.data_persistence import (
     get_distinct_values,
@@ -459,82 +459,182 @@ def render_api_key_warning():
 # ============================================================
 # 登录/注册页面
 # ============================================================
+def _find_login_layout() -> str | None:
+    """定位登录页纯净布局图，优先 pure_login_layout.png，回退兼容旧文件"""
+    candidates = [
+        os.path.join(_CURRENT_DIR, "assets", "pure_login_layout.png"),
+        os.path.join(_CURRENT_DIR, "assets", "pure_login_layout.jpg"),
+        os.path.join(_CURRENT_DIR, "assets", "login_bg.jpg.png"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def render_login_page():
-    """渲染登录/注册页面 —— Creamy Clean 奶油风"""
-    # 登录页居中
-    st.markdown("""
-    <style>
-    .login-wrapper {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 80vh;
-    }
-    .login-card {
-        background: #FFFFFF;
-        border: 1px solid #EFEFEF;
-        border-radius: 24px;
-        padding: 48px 40px;
-        max-width: 420px;
-        width: 100%;
-        box-shadow: 0 4px 24px rgba(45, 39, 34, 0.06);
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    """渲染登录/注册页面 —— 商业级奶油风全屏布局（纯 CSS 背景 + 右侧 st.form 浮层）"""
 
-    col_left, col_center, col_right = st.columns([1, 3, 1])
-    with col_center:
+    # ── CSS 背景画卷注入 & 表单右侧定位 ──
+    bg_path = _find_login_layout()
+    if bg_path:
+        with open(bg_path, "rb") as f:
+            bg_b64 = base64.b64encode(f.read()).decode()
+        ext = os.path.splitext(bg_path)[1].lower()
+        mime = "image/png" if ext == ".png" else "image/jpeg"
+
         st.markdown(
-            "<h1 style='text-align:center;font-size:2.4rem;font-weight:700;color:#2D2722;margin-bottom:4px;'>"
-            "HireInsight</h1>",
+            f"""
+            <style>
+            /* 隐藏 Streamlit 默认顶栏 */
+            [data-testid="stHeader"]          {{ background: transparent !important; }}
+            header[data-testid="stHeader"]     {{ background: transparent !important; }}
+
+            /* 全局背景图（右侧卡片已掏空擦除） */
+            .stApp {{
+                background-image: url("data:{mime};base64,{bg_b64}");
+                background-size: cover;
+                background-position: center;
+                background-repeat: no-repeat;
+                background-attachment: fixed;
+            }}
+
+            /* ── 精准定位 st.form，浮动于右侧空白卡片正上方 ── */
+            div[data-testid="stForm"] {{
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+                margin-left: auto !important;
+                margin-right: 8% !important;
+                margin-top: 8vh !important;
+                width: 380px !important;
+                padding: 0 !important;
+            }}
+
+            /* form 内部所有容器透明 */
+            div[data-testid="stForm"] * {{
+                background: transparent !important;
+            }}
+
+            /* 标签与文字颜色 */
+            .stMarkdown, label, .stTabs [role="tab"] {{
+                color: #2D2722 !important;
+            }}
+            .stTabs [role="tab"][aria-selected="true"] {{
+                color: #2D2722 !important;
+                border-bottom-color: #2D2722 !important;
+            }}
+
+            /* 输入框 → 奶油风毛玻璃 */
+            .stTextInput input {{
+                background: rgba(255,255,255,0.85) !important;
+                border: 1px solid #E0D6CC !important;
+                border-radius: 10px !important;
+                color: #2D2722 !important;
+                padding: 10px 14px !important;
+            }}
+            .stTextInput input::placeholder {{
+                color: #B8AA9E !important;
+            }}
+
+            /* form_submit_button → 暗巧克力渐变 */
+            .stFormSubmitButton > button,
+            button[kind="formSubmit"] {{
+                background: linear-gradient(135deg, #2D2722 0%, #5C4D42 100%) !important;
+                color: #FFFFFF !important;
+                border: none !important;
+                border-radius: 12px !important;
+                padding: 10px 24px !important;
+                font-weight: 600 !important;
+                font-size: 0.95rem !important;
+                width: 100% !important;
+                transition: all 0.25s ease !important;
+                box-shadow: 0 4px 14px rgba(45,39,34,0.18) !important;
+            }}
+            .stFormSubmitButton > button:hover,
+            button[kind="formSubmit"]:hover {{
+                transform: translateY(-1px);
+                box-shadow: 0 6px 22px rgba(45,39,34,0.28) !important;
+            }}
+
+            /* 提示信息 */
+            .stAlert {{
+                background: rgba(255,255,255,0.92) !important;
+            }}
+
+            /* 隐藏 Streamlit 默认的 block-container 居中行为，交给 form 接管 */
+            .stApp .block-container {{
+                max-width: none !important;
+                padding-left: 0 !important;
+                padding-right: 0 !important;
+            }}
+
+            /* 底部 footer 透明 */
+            footer {{ visibility: hidden !important; }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ── 右侧卡片表单（st.form 像素级复刻）──
+    with st.form("login_register_form", clear_on_submit=False):
+        # 标题（背景图右侧卡片已掏空，需代码手写）TODO final
+        st.markdown(
+            "<h2 style='color:#2D2722;text-align:center;font-weight:700;"
+            "margin-bottom:2px;'>HireInsight</h2>",
             unsafe_allow_html=True,
         )
         st.markdown(
-            "<p style='text-align:center;color:#7A7A7A;font-size:0.95rem;margin-bottom:32px;'>"
-            "智能求职辅助系统</p>",
+            "<p style='color:#7A7A7A;text-align:center;font-size:0.9rem;"
+            "margin-bottom:20px;'>智能求职辅助系统</p>",
             unsafe_allow_html=True,
         )
 
-        # 登录/注册切换标签
         tabs = st.tabs(["登录", "注册"])
 
         # ---------- 登录 ----------
         with tabs[0]:
-            with st.container(border=False):
-                login_username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
-                login_password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
-                st.markdown("")
-                if st.button("登录", use_container_width=True, key="btn_login"):
-                    if not login_username or not login_password:
-                        st.error("请输入用户名和密码")
-                    else:
-                        user = verify_login(login_username, login_password, _DB_PATH)
-                        if user:
-                            login_user(user)
-                            st.toast(f"欢迎回来，{user['display_name']}！", icon="🎉")
-                            st.rerun()
-                        else:
-                            st.error("用户名或密码错误")
+            login_username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
+            login_password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
 
         # ---------- 注册 ----------
         with tabs[1]:
-            with st.container(border=False):
-                reg_username = st.text_input("用户名", placeholder="3-32 位字母/数字/下划线", key="reg_username")
-                reg_display = st.text_input("显示名称", placeholder="你的昵称", key="reg_display")
-                reg_password = st.text_input("密码", type="password", placeholder="至少 6 位", key="reg_password")
-                reg_confirm = st.text_input("确认密码", type="password", placeholder="再次输入密码", key="reg_confirm")
-                st.markdown("")
-                if st.button("注册", use_container_width=True, key="btn_register"):
-                    if not reg_username or not reg_password or not reg_display:
-                        st.error("请填写所有必填项")
-                    elif reg_password != reg_confirm:
-                        st.error("两次输入的密码不一致")
+            reg_username = st.text_input("用户名", placeholder="3-32 位字母/数字/下划线", key="reg_username")
+            reg_display = st.text_input("显示名称", placeholder="你的昵称", key="reg_display")
+            reg_password = st.text_input("密码", type="password", placeholder="至少 6 位", key="reg_password")
+            reg_confirm = st.text_input("确认密码", type="password", placeholder="再次输入密码", key="reg_confirm")
+
+        st.markdown("")
+        submitted = st.form_submit_button("登录 / 注册", use_container_width=True)
+
+        if submitted:
+            # ── 智能判断：注册 Tab 特有字段是否被填写 ──
+            is_register_mode = bool(reg_display or reg_confirm)
+
+            if is_register_mode:
+                # --- 注册逻辑（100% 保持原 auth_db 调用） ---
+                if not reg_username or not reg_password or not reg_display:
+                    st.error("请填写所有必填项")
+                elif reg_password != reg_confirm:
+                    st.error("两次输入的密码不一致")
+                else:
+                    ok, msg = register_user(reg_username, reg_password, reg_display, _DB_PATH)
+                    if ok:
+                        st.success("注册成功！请切换至「登录」标签登录")
                     else:
-                        ok, msg = register_user(reg_username, reg_password, reg_display, _DB_PATH)
-                        if ok:
-                            st.success(f"注册成功！请登录")
-                        else:
-                            st.error(msg)
+                        st.error(msg)
+            else:
+                # --- 登录逻辑（100% 保持原 auth_db 调用） ---
+                if not login_username or not login_password:
+                    st.error("请输入用户名和密码")
+                else:
+                    user = verify_login(login_username, login_password, _DB_PATH)
+                    if user:
+                        login_user(user)
+                        st.toast(f"欢迎回来，{user['display_name']}！", icon="🎉")
+                        st.rerun()
+                    else:
+                        st.error("用户名或密码错误")
 
 
 # ============================================================
@@ -758,14 +858,14 @@ def render_home():
         try:
             import sqlite3
             conn = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
-            cursor = conn.execute("SELECT COUNT(*) FROM jobs")
+            cursor = conn.execute("SELECT COUNT(*) FROM job_positions")
             db_record_count = cursor.fetchone()[0]
             conn.close()
         except Exception:
             db_record_count = 0
     if db_exists and db_record_count > 0:
         db_dot = "#34C759"
-        db_text = f"已连接 · {db_record_count} 条记录"
+        db_text = f"已连接 · 实时底仓就绪 (当前承载 {db_record_count} 条真实岗位) ✅"
     elif db_exists:
         db_dot = "#FF9F0A"
         db_text = "已连接 · 暂无数据"
@@ -837,12 +937,13 @@ def render_dashboard():
     )
 
     # ---- 3. 公司来源（st.multiselect，奶油风中文本地化） ----
-    SOURCE_OPTIONS = ["netease", "tencent", "bytedance", "didi"]
+    SOURCE_OPTIONS = ["netease", "tencent", "bytedance", "didi", "meituan"]
     SOURCE_LABELS = {
         "netease": "网易官方",
         "tencent": "腾讯官方",
         "bytedance": "字节官方",
         "didi": "滴滴官方",
+        "meituan": "美团官方",
     }
     selected_sources = st.sidebar.multiselect(
         "公司来源",
@@ -953,7 +1054,7 @@ def render_dashboard():
         max_value=30,
         value=15,
         step=1,
-        help="左右拖拽控制每次向四家大厂招聘 API 请求的分页深度（关键词搜索联动精准定向模式）"
+        help="左右拖拽控制每次向五家大厂招聘 API 请求的分页深度（关键词搜索联动精准定向模式）"
     )
     st.session_state["crawl_pages"] = crawl_pages
 
@@ -1273,7 +1374,7 @@ def render_dashboard():
                 )
                 # 公司来源中文本地化
                 if "公司来源" in df_display.columns:
-                    source_map = {"netease": "网易官方", "tencent": "腾讯官方", "bytedance": "字节官方", "didi": "滴滴官方"}
+                    source_map = {"netease": "网易官方", "tencent": "腾讯官方", "bytedance": "字节官方", "didi": "滴滴官方", "meituan": "美团官方"}
                     df_display["公司来源"] = df_display["公司来源"].map(
                         lambda s: source_map.get(s, s)
                     )
@@ -1326,6 +1427,7 @@ def render_dashboard():
                 from utils.scraper.tencent_scraper import TencentScraper  # noqa: F811
                 from utils.scraper.bytedance_scraper import ByteDanceScraper  # noqa: F811
                 from utils.scraper.didi_scraper import DidiScraper  # noqa: F811
+                from utils.scraper.meituan_scraper import MeituanScraper  # noqa: F811
                 scraper_available = True
             except ImportError:
                 pass
@@ -1350,7 +1452,7 @@ def render_dashboard():
                         _cur = _conn.cursor()
                         if is_precision:
                             # 精准模式：只清除当前关键词相关的旧数据
-                            for _src in ["netease", "tencent", "bytedance", "didi"]:
+                            for _src in ["netease", "tencent", "bytedance", "didi", "meituan"]:
                                 _cur.execute(
                                     "DELETE FROM job_positions WHERE source = ? AND title LIKE ?",
                                     (_src, f"%{crawl_keyword}%"),
@@ -1414,6 +1516,15 @@ def render_dashboard():
                     except Exception as e:
                         st.warning(f"⚠️ 滴滴爬虫异常：{e}")
 
+                    try:
+                        mt_kw = crawl_keyword if is_precision else None
+                        mt_scraper = MeituanScraper(max_pages=pages, keyword=mt_kw)
+                        mt_raw = mt_scraper.crawl()
+                        st.write(f"✅ 美团{kw_label}：抓取 {len(mt_raw)} 条")
+                        raw_jobs.extend(mt_raw)
+                    except Exception as e:
+                        st.warning(f"⚠️ 美团爬虫异常：{e}")
+
                     # ---- [4/7] 数据转换 ----
                     status.update(
                         label="[4/7] 增量同步 | 多源数据转换（Transformer）...",
@@ -1425,8 +1536,9 @@ def render_dashboard():
                     tencent_raw = [j for j in raw_jobs if j.get("source") == "tencent"]
                     bytedance_raw = [j for j in raw_jobs if j.get("source") == "bytedance"]
                     didi_raw = [j for j in raw_jobs if j.get("source") == "didi"]
+                    meituan_raw = [j for j in raw_jobs if j.get("source") == "meituan"]
                     other_raw = [j for j in raw_jobs if j not in netease_raw and j not in tencent_raw
-                                 and j not in bytedance_raw and j not in didi_raw]
+                                 and j not in bytedance_raw and j not in didi_raw and j not in meituan_raw]
                     if netease_raw:
                         transformed_jobs.extend(transform_jobs(netease_raw, source="netease"))
                     if tencent_raw:
@@ -1435,6 +1547,8 @@ def render_dashboard():
                         transformed_jobs.extend(transform_jobs(bytedance_raw, source="bytedance"))
                     if didi_raw:
                         transformed_jobs.extend(transform_jobs(didi_raw, source="didi"))
+                    if meituan_raw:
+                        transformed_jobs.extend(transform_jobs(meituan_raw, source="meituan"))
                     if other_raw:
                         transformed_jobs.extend(other_raw)
                     st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
@@ -1470,7 +1584,7 @@ def render_dashboard():
         if is_precision:
             st.toast(f"✨ 精准定向同步完成 | 关键词「{crawl_keyword}」| {n_written if scraper_available else 0} 条", icon="🎯")
         else:
-            st.toast(f"✨ 全量刷新完成 | {pages} 页 x 4 厂 = 底仓已灌满！", icon="🎉")
+            st.toast(f"✨ 全量刷新完成 | {pages} 页 x 5 厂 = 底仓已灌满！", icon="🎉")
         st.rerun()
 
 
@@ -2648,6 +2762,31 @@ def render_settings():
         st.success(f"✅ DeepSeek API Key: `{masked_key}`")
     else:
         st.warning("⚠️ API Key 未配置")
+    
+    # ---- 自定义 API Key 配置（持久化写入 .env） ----
+    env_path = os.path.join(_CURRENT_DIR, ".env")
+    current_key = os.getenv("DEEPSEEK_API_KEY", "")
+    masked_placeholder = ""
+    if current_key and current_key != "your_api_key_here" and len(current_key) > 10:
+        masked_placeholder = current_key[:6] + "..." + current_key[-4:]
+    else:
+        masked_placeholder = "sk-..."
+    
+    custom_api_key = st.text_input(
+        "自定义 DeepSeek API Key",
+        type="password",
+        placeholder=masked_placeholder,
+        help="输入新的 API Key 以覆盖默认配置"
+    )
+    
+    if st.button("💾 保存 API Key 配置"):
+        if custom_api_key and custom_api_key.strip():
+            new_key = custom_api_key.strip()
+            set_key(env_path, "DEEPSEEK_API_KEY", new_key)
+            os.environ["DEEPSEEK_API_KEY"] = new_key
+            st.info("💡 配置已成功写入缓存！为了使新大模型密钥立即生效，请在下方点击『重新加载环境变量』按钮触发数仓热插拔。")
+        else:
+            st.warning("⚠️ 请输入有效的 API Key")
     
     st.text_input("DEEPSEEK_MODEL", value=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"), disabled=True)
     st.text_input("CHROMA_PERSIST_DIR", value=os.getenv("CHROMA_PERSIST_DIR", "./data/rag_store"), disabled=True)

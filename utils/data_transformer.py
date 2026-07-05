@@ -83,6 +83,35 @@ def _empty_record(source: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# 美团 → 标准映射
+# ---------------------------------------------------------------------------
+
+def _transform_meituan(raw: dict[str, Any]) -> dict[str, Any]:
+    """美团 → 标准中间格式。"""
+    record = _empty_record(source="meituan")
+    record["original_id"] = str(raw.get("jobUnionId") or raw.get("id", "")).strip()
+    record["title_raw"] = str(raw.get("name") or raw.get("title", "")).strip()
+    record["company"] = "美团"
+    record["department"] = str(raw.get("projectName") or raw.get("deptName", "")).strip()
+    record["category"] = str(raw.get("jobType") or raw.get("jobSpecialCode", "")).strip()
+    record["sub_category"] = str(raw.get("jobSource", "")).strip()
+    record["city_raw"] = str(raw.get("workCity") or raw.get("city", "")).strip()
+    record["district"] = ""
+    record["salary_raw"] = ""
+    record["experience_raw"] = ""
+    record["degree_raw"] = ""
+    record["work_type"] = "全职"
+    record["duty"] = ""
+    record["requirement"] = ""
+    record["skills"] = ""
+    jid = record["original_id"]
+    record["post_url"] = f"https://zhaopin.meituan.com/job-detail/{jid}" if jid else ""
+    record["published_at"] = ""
+    record["updated_at"] = ""
+    return record
+
+
+# ---------------------------------------------------------------------------
 # 滴滴 → 标准映射
 # ---------------------------------------------------------------------------
 
@@ -562,6 +591,7 @@ _TRANSFORMERS: dict[str, Any] = {
     "tencent": _transform_tencent,
     "bytedance": _transform_bytedance,
     "didi": _transform_didi,
+    "meituan": _transform_meituan,
     "lilith": _transform_lilith,   # [已废弃]
     "mihoyo": _transform_mihoyo,   # [已废弃]
 }
