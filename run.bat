@@ -39,7 +39,7 @@ echo.
 
 REM ---- 测试 RAG 模块 ----
 echo [3/4] 验证 RAG 模块...
-venv\Scripts\python.exe -c "from utils.rag_loader import init_store, load_mock_experiences, query_experiences; s=init_store(); load_mock_experiences(s); r=query_experiences('测试',1,s); print(f'  RAG 就绪 (文档数: {s.count()})')" 2>nul
+venv\Scripts\python.exe -c "from utils.rag_loader import init_store, query_experiences; s=init_store(); r=query_experiences('测试',1,s); print(f'  RAG 就绪 (文档数: {s.count()})')" 2>nul
 if errorlevel 1 (
     echo ⚠️ RAG 模块验证异常，但继续启动...
 ) else (

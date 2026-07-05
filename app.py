@@ -648,7 +648,7 @@ def render_home():
 
     # ---- 顶部 Banner 大图（存在则视觉做减法，剔除所有文本标题与副标题）----
     if HOME_BANNER_PATH and os.path.isfile(HOME_BANNER_PATH):
-        st.image(HOME_BANNER_PATH, use_column_width=True)
+        st.image(HOME_BANNER_PATH, use_container_width=True)
     else:
         st.markdown(
             f"<h1 style='font-weight:700;font-size:2.3rem;color:#2D2722;margin-bottom:6px;"
@@ -797,7 +797,7 @@ def render_dashboard():
     """渲染数据大屏页面"""
     # ---- 顶部 Banner 大图（存在则替代文本标题与副标题）----
     if DASHBOARD_BANNER_PATH and os.path.isfile(DASHBOARD_BANNER_PATH):
-        st.image(DASHBOARD_BANNER_PATH, use_column_width=True)
+        st.image(DASHBOARD_BANNER_PATH, use_container_width=True)
     else:
         st.title("📊 岗位数据大屏")
         st.markdown("**实时招聘信息分析看板**")
@@ -836,10 +836,10 @@ def render_dashboard():
     )
 
     # ---- 3. 公司来源（st.multiselect，奶油风中文本地化） ----
-    SOURCE_OPTIONS = ["netease", "mihoyo"]
+    SOURCE_OPTIONS = ["netease", "tencent"]
     SOURCE_LABELS = {
         "netease": "网易官方",
-        "mihoyo": "米哈游官方",
+        "tencent": "腾讯官方",
     }
     selected_sources = st.sidebar.multiselect(
         "公司来源",
@@ -939,6 +939,29 @@ def render_dashboard():
         st.sidebar.caption("📁 数仓状态：增量同步待激活")
 
     # ========================================================
+    # ⚙️ 数仓同步配置（侧边栏滑块控流面板）
+    # ========================================================
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("⚙️ 数仓同步配置")
+
+    crawl_pages = st.sidebar.slider(
+        "📬 单家公司批量爬取页数",
+        min_value=1,
+        max_value=30,
+        value=15,
+        step=1,
+        help="左右拖拽控制每次向网易/腾讯招聘 API 请求的分页深度"
+    )
+    st.session_state["crawl_pages"] = crawl_pages
+
+    # 将原本底部控制台的触发按钮迁移到侧边栏滑块正下方
+    pipeline_clicked = st.sidebar.button(
+        "🔄 开始大批量异步同步数据",
+        type="primary",
+        use_container_width=True,
+    )
+
+    # ========================================================
     # 主区域：数据接入 + KPI 指标栏 + Plotly 图表看板
     # ========================================================
     _MULTI_VALUE_KEYS = {"city", "degree", "source"}
@@ -969,7 +992,7 @@ def render_dashboard():
 
     if not db_exists:
         st.info(
-            "💡 离线数仓为空，请展开下方【🛠️ 离线数仓控制台】同步初始岗位数据。"
+            "💡 离线数仓为空，请使用左侧【⚙️ 数仓同步配置】面板同步初始岗位数据。"
         )
     elif not show_charts:
         st.info(
@@ -1006,24 +1029,26 @@ def render_dashboard():
                     y=list(salary_dist.values()),
                     text=list(salary_dist.values()),
                     textposition="outside",
-                    textfont=dict(size=13, color="#e0e0e0"),
+                    textfont=dict(size=13, color="#FFFFFF"),
                     marker=dict(
                         color=list(salary_dist.values()),
                         colorscale="Blues",
                         showscale=False,
-                        line=dict(width=1, color="#1a1a2e"),
+                        line=dict(width=1, color="#2D2722"),
                     ),
                     hovertemplate="薪资段: %{x}<br>岗位数: %{y}<extra></extra>",
                 )])
                 fig_salary.update_layout(
-                    title=dict(text="💰 薪资分布", font=dict(size=16, color="#e0e0e0")),
+                    title=dict(text="💰 薪资分布", font=dict(size=16, color="#FFFFFF")),
                     xaxis_title="薪资区间",
                     yaxis_title="岗位数",
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=20, r=20, t=40, b=20),
-                    plot_bgcolor="#0e1117",
-                    paper_bgcolor="#0e1117",
+                    font=dict(color="#FFFFFF", family="Arial"),
+                    paper_bgcolor="rgba(45,39,34,1)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(font=dict(color="#FFFFFF")),
                 )
                 st.plotly_chart(fig_salary, use_container_width=True)
             else:
@@ -1033,6 +1058,8 @@ def render_dashboard():
 
             degree_dist = stats["degree"].get("distribution", {})
             if degree_dist:
+                # 🔴 零值过滤：剔除 count==0 的分类，消除 0% 凌乱引线
+                degree_dist = {k: v for k, v in degree_dist.items() if v.get("count", 0) > 0}
                 degree_labels = list(degree_dist.keys())
                 degree_values = [v["count"] for v in degree_dist.values()]
                 fig_degree = go.Figure(data=[go.Pie(
@@ -1040,20 +1067,23 @@ def render_dashboard():
                     values=degree_values,
                     hole=0.5,
                     textinfo="label+percent",
-                    textfont=dict(size=12, color="#e0e0e0"),
+                    textfont=dict(size=12, color="#FFFFFF"),
                     marker=dict(
                         colors=["#636efa", "#00cc96", "#ab63fa", "#ffa15a",
                                 "#19d3f3", "#ff6692", "#b6e880"],
-                        line=dict(width=1, color="#0e1117"),
+                        line=dict(width=1, color="#2D2722"),
                     ),
                     hovertemplate="学历: %{label}<br>岗位数: %{value}<br>占比: %{percent}<extra></extra>",
                 )])
                 fig_degree.update_layout(
-                    title=dict(text="🎓 学历占比", font=dict(size=16, color="#e0e0e0")),
+                    title=dict(text="🎓 学历占比", font=dict(size=16, color="#FFFFFF")),
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=20, r=20, t=40, b=20),
-                    paper_bgcolor="#0e1117",
+                    font=dict(color="#FFFFFF", family="Arial"),
+                    paper_bgcolor="rgba(45,39,34,1)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(font=dict(color="#FFFFFF")),
                 )
                 st.plotly_chart(fig_degree, use_container_width=True)
 
@@ -1069,24 +1099,26 @@ def render_dashboard():
                     orientation="h",
                     text=city_counts,
                     textposition="outside",
-                    textfont=dict(size=13, color="#e0e0e0"),
+                    textfont=dict(size=13, color="#FFFFFF"),
                     marker=dict(
                         color=city_counts,
                         colorscale="Viridis",
                         showscale=False,
-                        line=dict(width=1, color="#1a1a2e"),
+                        line=dict(width=1, color="#2D2722"),
                     ),
                     hovertemplate="城市: %{y}<br>岗位数: %{x}<extra></extra>",
                 )])
                 fig_city.update_layout(
-                    title=dict(text="🌆 城市需求 Top 10", font=dict(size=16, color="#e0e0e0")),
+                    title=dict(text="🌆 城市需求 Top 10", font=dict(size=16, color="#FFFFFF")),
                     xaxis_title="岗位数",
                     yaxis_title=None,
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=20, r=20, t=40, b=20),
-                    plot_bgcolor="#0e1117",
-                    paper_bgcolor="#0e1117",
+                    font=dict(color="#FFFFFF", family="Arial"),
+                    paper_bgcolor="rgba(45,39,34,1)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(font=dict(color="#FFFFFF")),
                 )
                 st.plotly_chart(fig_city, use_container_width=True)
 
@@ -1094,6 +1126,8 @@ def render_dashboard():
 
             exp_dist = stats["experience"].get("distribution", {})
             if exp_dist:
+                # 🔴 零值过滤：剔除 count==0 的分类，消除 0% 凌乱引线
+                exp_dist = {k: v for k, v in exp_dist.items() if v.get("count", 0) > 0}
                 exp_labels = list(exp_dist.keys())
                 exp_values = [v["count"] for v in exp_dist.values()]
                 fig_exp = go.Figure(data=[go.Pie(
@@ -1101,165 +1135,175 @@ def render_dashboard():
                     values=exp_values,
                     hole=0.5,
                     textinfo="label+percent",
-                    textfont=dict(size=12, color="#e0e0e0"),
+                    textfont=dict(size=12, color="#FFFFFF"),
                     marker=dict(
                         colors=["#ffa15a", "#19d3f3", "#ab63fa", "#00cc96",
                                 "#636efa", "#ff6692", "#b6e880"],
-                        line=dict(width=1, color="#0e1117"),
+                        line=dict(width=1, color="#2D2722"),
                     ),
                     hovertemplate="经验: %{label}<br>岗位数: %{value}<br>占比: %{percent}<extra></extra>",
                 )])
                 fig_exp.update_layout(
-                    title=dict(text="⏳ 经验要求占比", font=dict(size=16, color="#e0e0e0")),
+                    title=dict(text="⏳ 经验要求占比", font=dict(size=16, color="#FFFFFF")),
                     template="plotly_dark",
                     height=400,
                     margin=dict(l=20, r=20, t=40, b=20),
-                    paper_bgcolor="#0e1117",
+                    font=dict(color="#FFFFFF", family="Arial"),
+                    paper_bgcolor="rgba(45,39,34,1)",
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    legend=dict(font=dict(color="#FFFFFF")),
                 )
                 st.plotly_chart(fig_exp, use_container_width=True)
 
+        # ========================================================
+        # 实时岗位底仓明细表单（宏观图表 → 微观数据闭环）
+        # ========================================================
+        if filtered_df is not None and not filtered_df.empty:
+            st.markdown("---")
+            with st.container(border=True):
+                st.subheader("📋 实时岗位底仓明细")
+
+                # 字段精选 + 中文映射（含公司名称和岗位链接）
+                display_cols: dict[str, str] = {
+                    "title": "岗位名称",
+                    "company": "公司名称",
+                    "salary_raw": "薪资待遇",
+                    "city": "工作城市",
+                    "degree": "学历要求",
+                    "experience_raw": "经验要求",
+                    "source": "公司来源",
+                    "post_url": "岗位链接",
+                }
+                # 仅取当前筛选中存在的列
+                available_cols: dict[str, str] = {
+                    k: v for k, v in display_cols.items() if k in filtered_df.columns
+                }
+                df_display = filtered_df[list(available_cols.keys())].rename(
+                    columns=available_cols
+                )
+                # 公司来源中文本地化
+                if "公司来源" in df_display.columns:
+                    source_map = {"netease": "网易官方", "tencent": "腾讯官方"}
+                    df_display["公司来源"] = df_display["公司来源"].map(
+                        lambda s: source_map.get(s, s)
+                    )
+
+                st.dataframe(
+                    df_display,
+                    use_container_width=True,
+                    height=min(38 * max(len(df_display), 1) + 38, 600),
+                    column_config={
+                        "岗位链接": st.column_config.LinkColumn(
+                            "🔗 岗位详情",
+                            help="点击直接跳转到网易/腾讯官方招聘官网查看原公告",
+                            display_text="点击跳转",
+                        ),
+                        "公司来源": st.column_config.TextColumn("数据通道"),
+                    },
+                    hide_index=True,
+                )
+
     # ========================================================
-    # 一键采集控制台
+    # 离线数仓控制台（信息面板，触发按钮已迁移至侧边栏）
     # ========================================================
     st.markdown("---")
     with st.expander("🛠️ 离线数仓控制台", expanded=False):
-        st.warning(
-            "⚠️ 增量更新：从大厂招聘官网抓取最新岗位数据，通过 Upsert 合并入本地离线数仓。"
-            "抓取+清洗约需 1-3 分钟，请耐心等待"
+        st.info(
+            "📋 **离线数仓控制台**\n\n"
+            "数据同步触发已迁移至左侧边栏 **⚙️ 数仓同步配置** 面板。\n\n"
+            "• 拖拽滑块控制每次爬取的页数（1-30 页）\n"
+            "• 点击「🔄 开始大批量异步同步数据」一键同步\n\n"
+            "同步过程通过 Upsert 合并入本地离线数仓，已存在岗位自动更新。"
         )
-        pipeline_clicked = st.button("🔄 一键获取并更新最新数据", type="primary", use_container_width=True)
 
     if pipeline_clicked:
-        scraper_available = False
-        try:
-            from utils.scraper.netease_scraper import NetEaseScraper  # noqa: F811
-            from utils.scraper.mihoyo_scraper import MihoyoScraper  # noqa: F811
-            scraper_available = True
-        except ImportError:
-            pass
+        pages = st.session_state.get("crawl_pages", 15)
 
-        with st.status("🔄 增量同步进行中...", expanded=True) as status:
-            status.update(
-                label="[1/6] 初始化数仓表结构...", state="running", expanded=True
-            )
-            init_sqlite_db(_DB_PATH)
+        with st.spinner(f"正在为您深度抓取双子星厂商前 {pages} 页实时岗位..."):
+            scraper_available = False
+            try:
+                from utils.scraper.netease_scraper import NetEaseScraper  # noqa: F811
+                from utils.scraper.tencent_scraper import TencentScraper  # noqa: F811
+                scraper_available = True
+            except ImportError:
+                pass
 
-            raw_jobs: list[dict] = []
-            used_real_scraper = False
-
-            if scraper_available:
+            with st.status("🔄 增量同步进行中...", expanded=True) as status:
                 status.update(
-                    label="[2/6] 增量采集 | 实时抓取中（NetEase + Mihoyo）...",
+                    label="[1/6] 初始化数仓表结构...", state="running", expanded=True
+                )
+                init_sqlite_db(_DB_PATH)
+
+                raw_jobs: list[dict] = []
+
+                if scraper_available:
+                    status.update(
+                        label=f"[2/6] 增量采集 | 实时抓取中（NetEase + Tencent，各 {pages} 页）...",
+                        state="running",
+                        expanded=True,
+                    )
+                    try:
+                        with NetEaseScraper(max_pages=pages) as netease_scraper:
+                            netease_raw = netease_scraper.crawl()
+                            st.write(f"✅ 网易：抓取 {len(netease_raw)} 条")
+                            raw_jobs.extend(netease_raw)
+                    except Exception as e:
+                        st.warning(f"⚠️ 网易爬虫异常：{e}")
+
+                    try:
+                        tencent_scraper = TencentScraper(max_pages=pages)
+                        tencent_raw = tencent_scraper.crawl()
+                        st.write(f"✅ 腾讯：抓取 {len(tencent_raw)} 条")
+                        raw_jobs.extend(tencent_raw)
+                    except Exception as e:
+                        st.warning(f"⚠️ 腾讯爬虫异常：{e}")
+
+
+                status.update(
+                    label="[3/6] 增量同步 | 多源数据转换（Transformer）...",
                     state="running",
                     expanded=True,
                 )
-                try:
-                    with NetEaseScraper(max_pages=5) as netease_scraper:
-                        netease_raw = netease_scraper.crawl()
-                        st.write(f"✅ 网易：抓取 {len(netease_raw)} 条")
-                        raw_jobs.extend(netease_raw)
-                except Exception as e:
-                    st.warning(f"⚠️ 网易爬虫异常：{e}")
-
-                try:
-                    with MihoyoScraper(max_pages=5) as mihoyo_scraper:
-                        mihoyo_raw = mihoyo_scraper.crawl()
-                        st.write(f"✅ 米哈游：抓取 {len(mihoyo_raw)} 条")
-                        raw_jobs.extend(mihoyo_raw)
-                except Exception as e:
-                    st.warning(f"⚠️ 米哈游爬虫异常：{e}")
-
-                used_real_scraper = True
-
-            if not raw_jobs:
-                if used_real_scraper:
-                    status.update(
-                        label="[2/6] 增量采集 | 实时接口异常，智能降级至模拟通道...",
-                        state="running",
-                        expanded=True,
-                    )
-                    st.info("📡 实时接口遭遇网络反爬，已自动切入本地高拟真数据通道保障演示。")
+                transformed_jobs: list[dict] = []
+                if scraper_available:
+                    netease_raw = [j for j in raw_jobs if j.get("source") == "netease"]
+                    tencent_raw = [j for j in raw_jobs if j.get("source") == "tencent"]
+                    other_raw = [j for j in raw_jobs
+                                 if j not in netease_raw and j not in tencent_raw]
+                    if netease_raw:
+                        transformed_jobs.extend(transform_jobs(netease_raw, source="netease"))
+                    if tencent_raw:
+                        transformed_jobs.extend(transform_jobs(tencent_raw, source="tencent"))
+                    if other_raw:
+                        transformed_jobs.extend(other_raw)
                 else:
-                    status.update(
-                        label="[2/6] 增量采集 | 爬虫模块未安装，生成模拟数据...",
-                        state="running",
-                        expanded=True,
-                    )
+                    transformed_jobs = raw_jobs
+                st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
 
-                mock_cities = ["深圳", "北京", "上海", "杭州", "成都", "广州", "武汉"]
-                mock_degrees = ["本科", "硕士", "博士", "大专", "不限"]
-                mock_companies = ["网易", "米哈游", "阿里巴巴", "美团", "百度"]
-                for i, city in enumerate(mock_cities):
-                    for j, degree in enumerate(mock_degrees):
-                        mock_source = "netease" if (i + j) % 2 == 0 else "mihoyo"
-                        raw_jobs.append({
-                            "id": f"mock_job_{i}_{j}",
-                            "original_id": f"mock_job_{i}_{j}",
-                            "title_raw": f"Python后端开发工程师-{city}",
-                            "company": mock_companies[(i + j) % len(mock_companies)],
-                            "city_raw": city,
-                            "salary_raw": f"{15 + j*5}k-{30 + j*10}k",
-                            "experience_raw": f"{j}-{j+3}年" if j > 0 else "应届生",
-                            "degree_raw": degree,
-                            "category": "技术",
-                            "department": "研发部",
-                            "duty": f"负责{city}区域后台系统开发",
-                            "requirement": "熟悉Python/Go",
-                            "skills": "Python, MySQL, Redis",
-                            "post_url": f"https://example.com/job/{i}_{j}",
-                            "work_type": "全职",
-                            "source": mock_source,
-                            "published_at": "2026-06-15",
-                            "updated_at": "2026-06-20",
-                        })
-                st.write(f"✅ 模拟数据：生成 {len(raw_jobs)} 条")
-                scraper_available = False
+                status.update(
+                    label="[4/6] 增量同步 | 正则清洗与标准化（Cleaner）...",
+                    state="running",
+                    expanded=True,
+                )
+                df_cleaned = clean_job_data(pd.DataFrame(transformed_jobs))
+                st.write(f"✅ 清洗完成：{len(df_cleaned)} 条有效记录")
 
-            status.update(
-                label="[3/6] 增量同步 | 多源数据转换（Transformer）...",
-                state="running",
-                expanded=True,
-            )
-            transformed_jobs: list[dict] = []
-            if scraper_available:
-                netease_raw = [j for j in raw_jobs if j.get("source") == "netease"]
-                mihoyo_raw = [j for j in raw_jobs if j.get("source") == "mihoyo"]
-                other_raw = [j for j in raw_jobs
-                             if j not in netease_raw and j not in mihoyo_raw]
-                if netease_raw:
-                    transformed_jobs.extend(transform_jobs(netease_raw, source="netease"))
-                if mihoyo_raw:
-                    transformed_jobs.extend(transform_jobs(mihoyo_raw, source="mihoyo"))
-                if other_raw:
-                    transformed_jobs.extend(other_raw)
-            else:
-                transformed_jobs = raw_jobs
-            st.write(f"✅ 转换完成：{len(transformed_jobs)} 条标准记录")
+                status.update(
+                    label="[5/6] 增量同步 | 写入离线数仓（Upsert）...",
+                    state="running",
+                    expanded=True,
+                )
+                n_written = save_to_sqlite(df_cleaned, _DB_PATH)
+                st.write(f"✅ 数仓写入：{n_written} 条已持久化")
 
-            status.update(
-                label="[4/6] 增量同步 | 正则清洗与标准化（Cleaner）...",
-                state="running",
-                expanded=True,
-            )
-            df_cleaned = clean_job_data(pd.DataFrame(transformed_jobs))
-            st.write(f"✅ 清洗完成：{len(df_cleaned)} 条有效记录")
-
-            status.update(
-                label="[5/6] 增量同步 | 写入离线数仓（Upsert）...",
-                state="running",
-                expanded=True,
-            )
-            n_written = save_to_sqlite(df_cleaned, _DB_PATH)
-            st.write(f"✅ 数仓写入：{n_written} 条已持久化")
-
-            status.update(
-                label="[6/6] 增量同步完成 ✅",
-                state="complete",
-                expanded=False,
-            )
+                status.update(
+                    label="[6/6] 增量同步完成 ✅",
+                    state="complete",
+                    expanded=False,
+                )
 
         st.cache_data.clear()
-        st.toast("🎉 增量更新完成！本地数仓已成功合并最新岗位。", icon="🎉")
+        st.toast(f"✨ 成功控流抓取 {pages} 页数据，数仓底仓已灌满！", icon="🎉")
         st.rerun()
 
 
@@ -1270,7 +1314,7 @@ def render_lighthouse():
     """渲染灯塔计划页面 —— 两阶段 UI：情景测评 → 技术倾向雷达图 + Roadmap 静态看板"""
     # ---- 顶部 Banner 大图（绝对路径；不存在时文本兜底）----
     if LIGHTHOUSE_BANNER_PATH and os.path.isfile(LIGHTHOUSE_BANNER_PATH):
-        st.image(LIGHTHOUSE_BANNER_PATH, use_column_width=True)
+        st.image(LIGHTHOUSE_BANNER_PATH, use_container_width=True)
     else:
         st.title("🧭 灯塔计划")
 
@@ -1699,7 +1743,7 @@ def render_interview():
     """渲染面试模拟页面 —— LangGraph 拓扑工作流 + 本地 RAG 全链路"""
     # ---- 顶部 Banner 大图（绝对路径；不存在时文本兜底）----
     if INTERVIEW_BANNER_PATH and os.path.isfile(INTERVIEW_BANNER_PATH):
-        st.image(INTERVIEW_BANNER_PATH, use_column_width=True)
+        st.image(INTERVIEW_BANNER_PATH, use_container_width=True)
     else:
         st.title("🎤 面试模拟")
 

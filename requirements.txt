@@ -2,7 +2,7 @@
 # Pin versions for environment consistency
 
 # Web UI Framework
-streamlit==1.39.0
+streamlit>=1.40.0
 
 # AI Orchestration
 langgraph==0.2.56

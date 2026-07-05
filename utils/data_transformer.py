@@ -6,7 +6,7 @@ utils/data_transformer.py
 
 功能定位
 --------
-    本模块位于"原始爬虫层"与"数据清洗层"之间，负责将网易和米哈游
+    本模块位于"原始爬虫层"与"数据清洗层"之间，负责将网易和腾讯
     两套异构的原始字典结构统一转换为标准中间字典。
 
 设计模式：策略模式（Strategy Pattern）
@@ -83,7 +83,195 @@ def _empty_record(source: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 米哈游 → 标准映射
+# 腾讯 → 标准映射
+# ---------------------------------------------------------------------------
+
+def _transform_tencent(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    将腾讯招聘原始岗位字典转换为标准中间格式。
+
+    映射关系：
+        source       → "tencent"
+        original_id  → raw["PostId"]
+        title_raw    → raw["RecruitPostName"]
+        company      → "腾讯"（硬编码）
+        department   → raw["BGName"]（事业群，如 CSIG/WXG/IEG 等）
+        category     → raw["CategoryName"]
+        city_raw     → raw["LocationName"]
+        experience_raw → raw["RequireWorkYearsName"]
+        duty         → raw["Responsibility"]
+        post_url     → raw["PostURL"]
+
+    Parameters
+    ----------
+    raw : dict
+        腾讯招聘 API 返回的单条原始岗位字典（Data.Posts[] 元素）
+
+    Returns
+    -------
+    dict
+        标准中间字典
+    """
+    record = _empty_record(source="tencent")
+
+    record["original_id"] = str(raw.get("PostId", "")).strip()
+    record["title_raw"] = str(raw.get("RecruitPostName", "")).strip()
+    record["company"] = "腾讯"
+    record["department"] = str(raw.get("BGName", "")).strip()
+    record["category"] = str(raw.get("CategoryName", "")).strip()
+    record["sub_category"] = str(raw.get("ProductName", "")).strip()
+    record["city_raw"] = str(raw.get("LocationName", "")).strip()
+    record["district"] = ""
+    record["salary_raw"] = ""
+    record["experience_raw"] = str(raw.get("RequireWorkYearsName", "")).strip()
+    record["degree_raw"] = ""
+    record["work_type"] = "全职"
+    record["duty"] = str(raw.get("Responsibility", "")).strip()
+    record["requirement"] = ""
+    record["skills"] = ""
+    record["post_url"] = str(raw.get("PostURL", "")).strip()
+    record["published_at"] = str(raw.get("LastUpdateTime", "")).strip()
+    record["updated_at"] = record["published_at"]
+
+    return record
+
+
+# ---------------------------------------------------------------------------
+# 莉莉丝 → 标准映射（已废弃，保留兼容）
+# ---------------------------------------------------------------------------
+
+def _transform_lilith(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    将莉莉丝游戏招聘原始岗位字典转换为标准中间格式。
+
+    莉莉丝使用飞书（Feishu）ATS 招聘平台，字段结构与 Feishu Career API 一致。
+
+    映射关系：
+        source       → "lilith"
+        original_id  → raw["id"]
+        title_raw    → raw["title"] / raw["name"]
+        company      → "莉莉丝游戏"（硬编码）
+        department   → raw["department"] / raw["departmentName"]
+        category     → raw["category"] / raw["jobCategory"]
+        sub_category → ""（莉莉丝无细类）
+        city_raw     → raw["city"] / raw["workCity"] / location 字段
+        salary_raw   → raw["salary"] / raw["salaryDesc"]（飞书可能返回）
+        experience_raw → raw["experience"] / raw["workYear"]
+        degree_raw   → raw["education"] / raw["degree"]
+        work_type    → raw["jobType"] / raw["employmentType"]
+        duty         → raw["description"] / raw["responsibility"]
+        requirement  → raw["requirement"] / raw["qualification"]
+        skills       → ""（无标签字段）
+        post_url     → raw 中的 apply_url 或拼接 Feishu 链接
+
+    Parameters
+    ----------
+    raw : dict
+        莉莉丝 Feishu 招聘 API 返回的单条原始岗位字典
+
+    Returns
+    -------
+    dict
+        标准中间字典（字段全部非 None）
+    """
+    record = _empty_record(source="lilith")
+
+    # ---- 基础标识 ----
+    job_id = raw.get("id")
+    record["original_id"] = str(job_id).strip() if job_id is not None else ""
+
+    # ---- 岗位名称 ----
+    record["title_raw"] = str(raw.get("title") or raw.get("name") or "").strip()
+
+    # ---- 公司（硬编码） ----
+    record["company"] = "莉莉丝游戏"
+
+    # ---- 部门 ----
+    record["department"] = str(
+        raw.get("department") or raw.get("departmentName") or ""
+    ).strip()
+
+    # ---- 职位类别 ----
+    record["category"] = str(
+        raw.get("category") or raw.get("jobCategory") or raw.get("job_category") or ""
+    ).strip()
+    record["sub_category"] = ""
+
+    # ---- 城市 ----
+    city = raw.get("city") or raw.get("workCity") or raw.get("work_city")
+    if isinstance(city, list) and city:
+        record["city_raw"] = ", ".join(str(c) for c in city if c)
+    elif city:
+        record["city_raw"] = str(city).strip()
+    else:
+        record["city_raw"] = ""
+    record["district"] = ""
+
+    # ---- 薪资 ----
+    record["salary_raw"] = str(
+        raw.get("salary") or raw.get("salaryDesc") or raw.get("salary_desc") or ""
+    ).strip()
+
+    # ---- 经验要求 ----
+    record["experience_raw"] = str(
+        raw.get("experience") or raw.get("workYear") or raw.get("work_year") or ""
+    ).strip()
+
+    # ---- 学历要求 ----
+    record["degree_raw"] = str(
+        raw.get("education") or raw.get("degree") or ""
+    ).strip()
+
+    # ---- 工作类型 ----
+    jt = str(raw.get("jobType") or raw.get("employmentType") or raw.get("job_type") or "").strip()
+    type_map = {
+        "全职": "全职", "实习": "实习", "兼职": "兼职",
+        "full-time": "全职", "intern": "实习", "part-time": "兼职",
+        "Full-time": "全职", "Intern": "实习",
+    }
+    record["work_type"] = type_map.get(jt, jt)
+
+    # ---- 文本内容 ----
+    record["duty"] = str(
+        raw.get("description") or raw.get("responsibility") or ""
+    ).strip()
+    record["requirement"] = str(
+        raw.get("requirement") or raw.get("qualification") or ""
+    ).strip()
+
+    # ---- 技能标签 ----
+    record["skills"] = ""
+
+    # ---- 链接 ----
+    apply_url = raw.get("applyUrl") or raw.get("apply_url") or raw.get("url")
+    if apply_url:
+        record["post_url"] = str(apply_url).strip()
+    elif record["original_id"]:
+        record["post_url"] = (
+            f"https://lilithgames.jobs.feishu.cn/global/position/"
+            f"{record['original_id']}"
+        )
+
+    # ---- 时间 ----
+    publish_time = raw.get("publishTime") or raw.get("createTime") or raw.get("create_time")
+    if publish_time and isinstance(publish_time, (int, float)):
+        from datetime import datetime, timezone
+        try:
+            dt = datetime.fromtimestamp(publish_time / 1000, tz=timezone.utc)
+            record["published_at"] = dt.strftime("%Y-%m-%d")
+        except (OSError, ValueError):
+            record["published_at"] = str(publish_time)
+    elif publish_time and isinstance(publish_time, str):
+        record["published_at"] = publish_time
+    else:
+        record["published_at"] = ""
+    record["updated_at"] = record["published_at"]
+
+    return record
+
+
+# ---------------------------------------------------------------------------
+# 米哈游 → 标准映射（已废弃，保留防止旧数据引用）
 # ---------------------------------------------------------------------------
 
 def _transform_mihoyo(raw: dict[str, Any]) -> dict[str, Any]:
@@ -309,7 +497,9 @@ def _transform_netease(raw: dict[str, Any]) -> dict[str, Any]:
 
 _TRANSFORMERS: dict[str, Any] = {
     "netease": _transform_netease,
-    "mihoyo": _transform_mihoyo,
+    "tencent": _transform_tencent,
+    "lilith": _transform_lilith,   # [已废弃]
+    "mihoyo": _transform_mihoyo,   # [已废弃]
 }
 
 _VALID_SOURCES: set[str] = set(_TRANSFORMERS.keys())
@@ -326,7 +516,9 @@ def transform_jobs(raw_list: list[dict], source: str) -> list[dict]:
     策略路由
     --------
         source="netease" → _transform_netease()
-        source="mihoyo"  → _transform_mihoyo()
+        source="tencent"  → _transform_tencent()
+        source="lilith"   → _transform_lilith()（已废弃）
+        source="mihoyo"   → _transform_mihoyo()（已废弃）
 
     容错机制
     --------

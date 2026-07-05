@@ -175,7 +175,7 @@ def get_or_init_collection() -> RagStore:
     """
     单例获取/初始化向量存储。
 
-    初始化逻辑：目录检测 → 自动加载 Mock 面经 → 返回 store。
+    初始化逻辑：目录检测 → 返回 store。
     此单例设计可防止 Streamlit 多线程重复实例化。
     """
     global _store_instance
@@ -183,11 +183,6 @@ def get_or_init_collection() -> RagStore:
         return _store_instance
 
     _store_instance = init_store()
-
-    # 若向量库为空，自动加载 Mock 面经数据
-    if _store_instance.count() == 0:
-        load_mock_experiences(_store_instance)
-
     return _store_instance
 
 
@@ -238,54 +233,6 @@ def load_experiences_to_rag(
         st.save()
 
     return len(ids)
-
-
-def load_mock_experiences(store: Optional[RagStore] = None) -> int:
-    """
-    加载 Mock 面经数据（用于开发测试）。
-
-    返回：
-        加载的数据条数
-    """
-    mock_data = [
-        {
-            "company": "字节跳动",
-            "position": "Python后端",
-            "question": "如何设计一个高并发的消息队列？",
-            "answer": "可以从 RabbitMQ、Kafka 的原理讲起，涉及消息持久化、分区、消费者组等概念...",
-            "difficulty": "hard",
-        },
-        {
-            "company": "阿里巴巴",
-            "position": "数据工程师",
-            "question": "讲一下 ETL 和 ELT 的区别？",
-            "answer": "ETL 是先抽取再转换后加载，适合数据量较小的场景；ELT 是直接加载原始数据...",
-            "difficulty": "medium",
-        },
-        {
-            "company": "腾讯",
-            "position": "全栈工程师",
-            "question": "React 的 Hooks 原理是什么？",
-            "answer": "Hooks 利用了 React 的 Fiber 架构，通过链表存储状态，实现函数组件的状态管理...",
-            "difficulty": "medium",
-        },
-        {
-            "company": "美团",
-            "position": "后端开发",
-            "question": "Redis 集群是如何实现高可用的？",
-            "answer": "Redis Cluster 采用哈希槽分区，支持主从复制和故障转移...",
-            "difficulty": "medium",
-        },
-        {
-            "company": "拼多多",
-            "position": "算法工程师",
-            "question": "如何处理样本不平衡问题？",
-            "answer": "可以使用 SMOTE 过采样、欠采样、类别权重调整或 Focal Loss 等方法...",
-            "difficulty": "hard",
-        },
-    ]
-
-    return load_experiences_to_rag(mock_data, store)
 
 
 def query_experiences(
@@ -352,10 +299,6 @@ if __name__ == "__main__":
     # 初始化
     store = init_store()
     print(f"向量存储已加载，当前文档数：{store.count()}")
-
-    # 加载 Mock 数据
-    count = load_mock_experiences(store)
-    print(f"加载 Mock 数据：{count} 条")
 
     # 测试检索
     results = query_experiences("Python后端面试", n_results=2, store=store)
